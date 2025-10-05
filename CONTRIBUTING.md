@@ -24,20 +24,22 @@ VibeTune follows CP/M/DOS 8.3 filename conventions:
 - Lowercase letters are acceptable
 - Avoid forcing uppercase unless needed
 
-### Current Architecture
+### Current Architecture (v0.2.0)
 
-**Single File Structure** (to be refactored):
-- `vibetune.asm` - Monolithic source (~57K lines)
-- Includes PTx player, MYM player, hardware abstraction
-- Direct port from RomWBW Tune v3.13
+**Modular Structure**:
+- `vibetune.asm` - Main program logic (streamlined)
+- `src/audio/filetype_config.inc` - Format-specific audio configuration
+- `src/io/filetype_detection.inc` - File type identification
+- `src/io/filetypes.inc` - File type constants
+- `src/hardware/constants.inc` - Hardware definitions
+- `src/ui/messages.inc` - User interface messages
 
-### Planned Refactoring
+### Extension Points
 
-The codebase will be modularized into:
-- `audio/` - Sound generation and playback engines
-- `io/` - File I/O and data parsing
-- `hardware/` - Sound chip detection and management
-- `ui/` - User interface and command processing
+The modular architecture provides clear extension points for:
+- **New file formats** - Add detection logic and configuration
+- **Hardware support** - Extend constants and detection
+- **UI enhancements** - Modify message handling and display
 
 ### Testing Strategy
 
@@ -67,12 +69,19 @@ The codebase will be modularized into:
 5. Commit with descriptive messages
 6. Ensure `make release` works before PR
 
-### Future Contribution Areas
+### Immediate Contribution Opportunities
 
-1. **Additional audio formats** (SID, MOD, etc.)
-2. **Enhanced hardware support** (OPL, FM synthesis)
-3. **User interface improvements** (real-time controls)
-4. **Performance optimization** (faster file loading)
-5. **Advanced features** (playlists, effects)
+1. **Additional audio formats** (VGM, D00, SID, MOD) - Use established extension points
+2. **Enhanced hardware support** (OPL, FM synthesis) - Extend hardware constants
+3. **User interface improvements** (real-time controls, better info display)
+4. **Advanced features** (playlists, looping, volume control)
+5. **Performance optimization** (faster file loading, better timing)
 
-The project is currently in Phase 2 (Enhancement) - ready for modularization and feature additions.
+### Development Guidelines
+
+- **Small, safe changes** - Test each modification thoroughly
+- **Preserve compatibility** - Maintain existing functionality
+- **Follow module boundaries** - Respect the established architecture
+- **Document extensions** - Update relevant .md files
+
+The project has completed Phase 2 (Modularization) and is ready for format extensions and feature enhancements.

@@ -1,8 +1,8 @@
-# VibeTune v0.1.0
+# VibeTune v0.2.0
 
 VibeTune is an enhanced music player for RomWBW, evolved from the original Tune.com application. This project aims to create a more advanced and feature-rich sound player that supports multiple sound file formats and multiple sound cards.
 
-**Current Version**: v0.1.0 - Based on RomWBW Tune v3.13 (28-May-2025)
+**Current Version**: v0.2.0 - Based on RomWBW Tune v3.13 (28-May-2025)
 
 ## Version Numbering
 
@@ -13,13 +13,18 @@ VibeTune follows semantic versioning (major.minor.patch):
 
 ## Features
 
-Currently VibeTune supports the same features as the original Tune.com:
-
+### Core Functionality
 - **Sound File Formats**: PT2, PT3, and MYM files
 - **Sound Chips**: AY-3-8910, YM2149, and compatible chips
 - **Multiple Platforms**: Supports various RomWBW-compatible systems
 - **Hardware Detection**: Automatic sound hardware detection and configuration
 - **Multiple Sound Modules**: Support for various sound expansion cards
+
+### Architecture (v0.2.0+)
+- **Modular Design**: Clean separation of file type detection, audio configuration, and UI
+- **Extensible**: Easy addition of new file formats (VGM, D00, etc.)
+- **Organized Codebase**: Logical module structure in `src/` directories
+- **Maintainable**: Separated constants, messages, and hardware definitions
 
 ## Usage
 
@@ -81,10 +86,12 @@ Future enhancements planned for VibeTune:
 
 ## Technical Notes
 
-- Maximum CPU speed: ~8MHz for proper sound chip operation (Z180 can run faster due to I/O wait states)
-- Optimal PSG clock: ~1.77MHz (similar to MSX/ZX Spectrum standards)
-- Memory requirement: Loads files up to available heap space (typically ~48KB)
-- Timer support: Uses hardware timers when available, falls back to CPU delay loops
+- **Binary size**: 4,890 bytes (optimized with modular architecture)
+- **Maximum CPU speed**: ~8MHz for proper sound chip operation (Z180 can run faster due to I/O wait states)
+- **Optimal PSG clock**: ~1.77MHz (similar to MSX/ZX Spectrum standards)
+- **Memory requirement**: Loads files up to available heap space (typically ~48KB)
+- **Timer support**: Uses hardware timers when available, falls back to CPU delay loops
+- **Architecture**: Modular design with separated concerns for easy extension
 
 ## Origins
 
