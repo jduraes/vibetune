@@ -32,6 +32,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Dynamic build date in banner message (DD-MMM-YYYY format)
+- Automatic build date injection during compilation
+- Enhanced build system with emulator testing
+- MAME deployment automation
+- Comprehensive make targets (test, deploy, release, help, clean)
+
 ### Planned
 - Additional sound file format support
 - Enhanced user interface and playback controls

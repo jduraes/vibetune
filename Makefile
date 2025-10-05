@@ -9,6 +9,11 @@ include $(TOOLS)/Makefile.inc
 DEPS := vibetune.asm $(shell find . -name '*.inc')
 
 vibetune.com: $(DEPS)
+	@echo "\n=== Updating build date ==="
+	@BUILD_DATE=$$(date "+%d-%b-%Y"); \
+	sed "s/VibeTune v0.1.0 for RomWBW, [0-9][0-9]-[A-Za-z][A-Za-z][A-Za-z]-[0-9][0-9][0-9][0-9]/VibeTune v0.1.0 for RomWBW, $$BUILD_DATE/g" vibetune.asm > vibetune_temp.asm && \
+	mv vibetune_temp.asm vibetune.asm
+	@echo "Build date updated to: $$(date "+%d-%b-%Y")"
 	$(TASM) -dWBW vibetune.asm vibetune.com vibetune.lst
 	@echo "\n=== Build successful! ==="
 	@echo "Binary size: $$(wc -c < vibetune.com) bytes"

@@ -710,7 +710,7 @@ OCTAVEADJ	.DB	0	; AMOUNT TO ADJUST OCTAVE UP OR DOWN
 
 USEPORTS	.DB	0	; AUDIO CHIP PORT SELECTION MODE
 
-MSGBAN		.DB	"VibeTune v0.1.0 - Enhanced Music Player for RomWBW",0
+MSGBAN		.DB	"VibeTune v0.1.0 for RomWBW, 05-Oct-2025",0
 MSGUSE		.DB	"Based on RomWBW Tune v3.13, 28-May-2025",13,10
 		.DB	"Copyright (C) 2025, Wayne Warthen, GNU GPL v3",13,10
 		.DB	"PTxPlayer Copyright (C) 2004-2007 S.V.Bulba",13,10
