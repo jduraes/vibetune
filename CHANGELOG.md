@@ -30,17 +30,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Uses z88dk-compatible build system
 - Successfully tested with z88dk-ticks emulator
 
-## [Unreleased]
+## [0.2.0] - 2025-10-05
 
-### Added
+### Added 
+- Modular file type identification system
+- File type detection module (`src/io/filetype_detection.inc`)
+- File type configuration module (`src/audio/filetype_config.inc`) 
+- Clear extension points for adding new file formats (VGM, D00, etc.)
+- Improved code organization and maintainability
 - Dynamic build date in banner message (DD-MMM-YYYY format)
 - Automatic build date injection during compilation
 - Enhanced build system with emulator testing
 - MAME deployment automation
 - Comprehensive make targets (test, deploy, release, help, clean)
 
+### Changed
+- Restructured file type handling for better modularity
+- Reduced main program complexity through modularization
+- Fixed include order dependency issues
+
+### Fixed
+- Console I/O functionality after modularization
+- Proper function definition ordering
+
+## [Unreleased]
+
 ### Planned
-- Additional sound file format support
+- Additional sound file format support (VGM, D00, etc.)
 - Enhanced user interface and playback controls
 - Multi-sound card management improvements
 - Real-time audio controls (volume, tempo, channel muting)

@@ -174,3 +174,34 @@ Each modularization step must pass:
 5. **Performance** - No significant timing changes
 
 This approach ensures VibeTune maintains functionality while gradually becoming more modular and maintainable.
+
+## ✅ Completed Modularization (Phase 2.2 - 2.3)
+
+### Phase 2.2: Constants and Messages (Completed)
+- **`src/ui/messages.inc`** - All user interface and error messages
+- **`src/io/filetypes.inc`** - File type constants and port selections
+- **`src/hardware/constants.inc`** - Hardware constants and conditional assembly flags
+
+### Phase 2.3: File Type System (Completed)
+- **`src/io/filetype_detection.inc`** - File type identification logic
+  - `DETECT_FILE_TYPE` function: Analyzes FCB filename/extension and sets FILTYP
+  - Handles .PT2, .PT3, .MYM extensions with default PT3 fallback
+  - 57 lines extracted from main program
+
+- **`src/audio/filetype_config.inc`** - File-specific audio configuration and playback
+  - `CONFIGURE_FILE_LOAD_ADDRESS` function: Sets appropriate DMA load address
+  - `CONFIGURE_FILE_PLAYBACK` function: Complete file-specific player dispatch
+  - Includes all PT2/PT3/MYM timing configurations and player loops
+  - 120 lines extracted from main program
+
+**Benefits Achieved:**
+- Clear separation of file type identification and audio configuration
+- Easy extension point for adding new file formats (VGM, D00, etc.)
+- Main program reduced to high-level orchestration calls
+- All file type logic is now contained in logical modules
+
+**Current Status:**
+- Main file: 2,558 lines (reduced from original 2,749)
+- Modular includes: 175 lines (detection + configuration)
+- Binary size: 5,039 bytes (11 bytes increase due to function call overhead)
+- Functionality: ✅ Identical behavior validated via emulator testing
