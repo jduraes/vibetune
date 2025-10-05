@@ -38,10 +38,35 @@ VIBETUNE <filename>.[PT2|PT3|MYM] [-msx|-rc] [-delay] [--hbios] [+tn|-tn]
 
 ## Building
 
-To build VibeTune:
+VibeTune includes an enhanced build system with testing and deployment automation.
 
+### Basic Build
 ```bash
-make vibetune.com
+make vibetune.com    # Build the executable
+```
+
+### Testing & Deployment
+```bash
+make test           # Run emulator test with z88dk-ticks
+make deploy         # Copy to MAME disk (/Volumes/FATDISK)
+make release        # Build + test + deploy in one command
+```
+
+### Other Commands
+```bash
+make help           # Show all available targets
+make clean          # Remove build artifacts
+```
+
+### MAME Testing
+The build system automatically deploys VibeTune to your MAME FATDISK when you run `make deploy` or `make release`. Sample music files are also copied for testing:
+- `Attack.pt3` - PT3 format demo
+- `Demo.mym` - MYM format demo
+
+In MAME (CP/M system), you can test with:
+```
+VIBETUNE ATTACK.PT3
+VIBETUNE DEMO.MYM
 ```
 
 ## Development Roadmap
