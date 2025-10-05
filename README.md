@@ -98,6 +98,14 @@ VibeTune is based on the original Tune.com from RomWBW, which incorporates:
 
 GNU GPL v3 (inherited from original Tune.com)
 
+## Documentation
+
+For comprehensive project information:
+
+- **[PROJECT_STATUS.md](PROJECT_STATUS.md)** - Complete development status, objectives, and roadmap
+- **[CONTRIBUTING.md](CONTRIBUTING.md)** - Development guide and contribution workflow  
+- **[CHANGELOG.md](CHANGELOG.md)** - Version history and release notes
+
 ## Contributing
 
-This project is in active development. Contributions and suggestions are welcome!
+This project is in active development. See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and workflow. Contributions and suggestions are welcome!
