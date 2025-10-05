@@ -1,0 +1,5 @@
+*.com
+*.lst
+*.o
+*.obj
+.DS_Store
