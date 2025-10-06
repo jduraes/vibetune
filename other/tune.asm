@@ -64,7 +64,7 @@
 ; Main program
 ;===============================================================================
 ;
-#include	"../RomWBW/Source/ver.inc"
+#include	"../../ver.inc"
 #include	"hbios.inc"
 #include	"cpm.inc"
 #include	"tune.inc"
@@ -411,7 +411,6 @@ EXIT	CALL	START+8			; Mute audio
 #include "strings.inc"
 #include "cli.inc"
 #include "printing.inc"
-#include "src/ui/messages.inc"
 
 ;
 ; Get a keystroke from CPM
@@ -710,8 +709,25 @@ DELAYMD		.DB	0	; FORCE DELAY MODE IF TRUE (NON-ZERO)
 OCTAVEADJ	.DB	0	; AMOUNT TO ADJUST OCTAVE UP OR DOWN
 
 USEPORTS	.DB	0	; AUDIO CHIP PORT SELECTION MODE
+
+MSGBAN		.DB	"Tune Player for RomWBW v3.13, 28-May-2025",0
+MSGUSE		.DB	"Copyright (C) 2025, Wayne Warthen, GNU GPL v3",13,10
+		.DB	"PTxPlayer Copyright (C) 2004-2007 S.V.Bulba",13,10
+		.DB	"MYMPlay by Marq/Lieves!Tuore",13,10,13,10
+		.DB	"Usage: TUNE <filename>.[PT2|PT3|MYM] [-msx|-rc] [-delay] [--hbios] [+tn|-tn]",0
+MSGBIO		.DB	"Incompatible BIOS or version, "
+		.DB	"HBIOS v", '0' + RMJ, ".", '0' + RMN, " required",0
+MSGPLT		.DB	"Hardware error, system not supported!",0
+MSGHW		.DB	"Hardware error, sound chip not detected!",0
+MSGNAM		.DB	"Sound filename invalid (must be .PT2, .PT3, or .MYM)",0
+MSGFIL		.DB	"Sound file not found!",0
+MSGSIZ		.DB	"Sound file too large to load!",0
+MSGTIM		.DB	", timer mode",0
+MSGDLY		.DB	", delay mode",0
+MSGPLY		.DB	"Playing...",0
+MSGEND		.DB	" Done",0
+MSGERR		.DB	"App Error", 0
 ;
-; Hardware description strings
 HWSTR_SCG	.DB	"SCG ECB Board",0
 HWSTR_N8	.DB	"N8 Onboard Sound",0
 HWSTR_RCEB	.DB	"RCBus Sound Module (EB)",0
@@ -724,6 +740,11 @@ HWSTR_NABU	.DB	"NABU Onboard Sound",0
 HWSTR_HEATH	.DB	"HEATH H8 MSX Module",0
 HWSTR_MSX	.DB	"MSX Standard Ports (A0H/A1H)",0
 HWSTR_RC	.DB	"RCBus Standard Ports (D8H/D0H)",0
+
+MSGUNSUP	.db	"MYM files not supported with HBIOS yet!\r\n", 0
+
+MSGSONGNAME     .DB     "Song name: ", 0
+MSGARTIST       .DB     "by:        ", 0
 ;
 ;===============================================================================
 ; PTx Player Routines
