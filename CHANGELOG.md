@@ -53,6 +53,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Console I/O functionality after modularization
 - Proper function definition ordering
 
+## [0.2.6] - 2025-10-07
+
+### Added
+- **SUCCESS**: Complete Include File Modularization
+  - Organized all `.inc` files from root directory into logical modular structure
+  - Created new directories: `src/system/`, `src/utils/`, `src/cli/`
+  - Moved 7 include files to appropriate locations with updated paths
+  - Incremental testing approach prevented regressions
+  - Clean root directory with proper modular organization
+
+### Changed
+- **Include Structure**: All includes now use modular paths
+  - `src/system/`: `hbios.inc`, `cpm.inc` (system interface files)
+  - `src/utils/`: `printing.inc`, `strings.inc`, `timing.inc` (utility functions)
+  - `src/cli/`: `cli.inc` (command-line processing)
+  - `src/tune.inc`: Application-specific macros
+  - `src/ui/messages.inc`: UI messages (already modularized)
+
+### Technical
+- Version updated to 0.2.6 with build date 07-Oct-2025
+- Binary size maintained at 5,028 bytes (no functionality changes)
+- All tests pass, full compatibility preserved
+- Incremental approach: Test after each file move (successful pattern)
+
 ## [0.2.5] - 2025-10-06
 
 ### Attempted

@@ -65,9 +65,9 @@
 ;===============================================================================
 ;
 #include	"../RomWBW/Source/ver.inc"
-#include	"hbios.inc"
-#include	"cpm.inc"
-#include	"tune.inc"
+#include	"src/system/hbios.inc"
+#include	"src/system/cpm.inc"
+#include	"src/tune.inc"
 ;
 HEAPEND		.EQU	$C000		; End of heap storage
 ;
@@ -407,10 +407,10 @@ EXIT	CALL	START+8			; Mute audio
 	CALL	CRLF			; Formatting
 	JP	0			; Exit the easy way
 
-#include "timing.inc"
-#include "strings.inc"
-#include "cli.inc"
-#include "printing.inc"
+#include "src/utils/timing.inc"
+#include "src/utils/strings.inc"
+#include "src/cli/cli.inc"
+#include "src/utils/printing.inc"
 #include "src/ui/messages.inc"
 
 ;

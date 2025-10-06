@@ -4,7 +4,7 @@
 ;===============================================================================
 
 ; Main application messages
-MSGBAN		.DB	"VibeTune v0.2.5 for RomWBW, 06-Oct-2025",0
+MSGBAN		.DB	"VibeTune v0.2.6 for RomWBW, 07-Oct-2025",0
 MSGUSE		.DB	"Based on RomWBW Tune v3.13, 28-May-2025",13,10
 		.DB	"Copyright (C) 2025, Wayne Warthen, GNU GPL v3",13,10
 		.DB	"PTxPlayer Copyright (C) 2004-2007 S.V.Bulba",13,10
