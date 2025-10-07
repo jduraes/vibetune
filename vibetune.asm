@@ -101,7 +101,7 @@ CurPosCounter	.EQU	0	; 2) Current position counter at (START+11)
 ACBBAC		.EQU	0	; 3) Allow channels allocation bits at (START+10)
 LoopChecker	.EQU	1	; 4) Allow loop checking and disabling
 Id		.EQU	1	; 5) Insert official identificator
-#DEFINE Release "1"		; Release number
+; Release number now defined in src/io/filetypes.inc
 
 	.ORG	$0100
 ;
