@@ -43,12 +43,23 @@ HASEXT	LD	A,(FCB+9)		; Extension char 1
 	JP	ERRNAM			; Anything else is a bad file extension
 CHKMYM	LD	A,(FCB+9)		; Extension char 1
 	CP	'M'			; Check for 'M'
-	JP	NZ,ERRNAM		; If not, bad file extension
+	JP	NZ,CHKVGM		; If not, check for VGM extension
 	LD	A,(FCB+10)		; Extension char 2
 	CP	'Y'			; Check for 'Y'
 	JP	NZ,ERRNAM		; If not, bad file extension
 	LD	A,(FCB+11)		; Extension char 3
 	LD	C,TYPMYM		; Assume MYM file type
+	CP	'M'			; Check for 'M'
+	JR	Z,_SETTYPE		; If so, commit file type value
+	JP	ERRNAM			; Anything else is a bad file extension
+CHKVGM	LD	A,(FCB+9)		; Extension char 1
+	CP	'V'			; Check for 'V'
+	JP	NZ,ERRNAM		; If not, bad file extension
+	LD	A,(FCB+10)		; Extension char 2
+	CP	'G'			; Check for 'G'
+	JP	NZ,ERRNAM		; If not, bad file extension
+	LD	A,(FCB+11)		; Extension char 3
+	LD	C,TYPVGM		; Assume VGM file type
 	CP	'M'			; Check for 'M'
 	JR	Z,_SETTYPE		; If so, commit file type value
 	JP	ERRNAM			; Anything else is a bad file extension

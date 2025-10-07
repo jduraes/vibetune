@@ -119,3 +119,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Real-time audio controls (volume, tempo, channel muting)
 - Playlist and looping functionality
 - **Deferred**: Audio engine modularization (requires more careful architectural analysis)
+- v0.2.6.8 (2025-10-07) - MAME verified build

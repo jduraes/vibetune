@@ -1,8 +1,8 @@
-# VibeTune v0.2.6
+# VibeTune v0.2.6.8
 
 VibeTune is an enhanced music player for RomWBW, evolved from the original Tune.com application. This project aims to create a more advanced and feature-rich sound player that supports multiple sound file formats and multiple sound cards.
 
-**Current Version**: v0.2.0 - Based on RomWBW Tune v3.13 (28-May-2025)
+**Current Version**: v0.2.6.8 - Based on RomWBW Tune v3.13 (28-May-2025)
 
 ## Version Numbering
 

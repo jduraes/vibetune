@@ -218,48 +218,8 @@ TSTTIMER:
 	LD	BC,HEAPEND-HEAP-1	; Size of heap except first byte
 	LDIR				; Propagate zero to rest of heap
 ;
-	; Check sound filename (must be *.PT2, *.PT3, or *.MYM)
-	LD	A,(FCB+1)		; Get first char of filename
-	CP	' '			; Compare to blank
-	JP	Z,ERRCMD		; If so, missing filename
-	LD	A,(FCB+9)		; If the filetype
-	CP	' '			; is blanks
-	JR	NZ,HASEXT		; then assume
-	LD	A,'P'			; type PT3.
-	LD	(FCB+9),A
-	LD	A,'T'			; Fill in
-	LD	(FCB+10),A		; the file
-	LD	A,'3'			; extension
-	LD	(FCB+11),A		; and the
-	LD	C,TYPPT3		; file type
-	JR	_SET
-HASEXT	LD	A,(FCB+9)		; Extension char 1
-	CP	'P'			; Check for 'P'
-	JP	NZ,CHKMYM		; If not, check for MYM extension
-	LD	A,(FCB+10)		; Extension char 2
-	CP	'T'			; Check for 'T'
-	JP	NZ,ERRNAM		; If not, bad file extension
-	LD	A,(FCB+11)		; Extension char 3
-	LD	C,TYPPT2		; Assume PT2 file type
-	CP	'2'			; Check for '2'
-	JR	Z,_SET			; If so, commit file type value
-	LD	C,TYPPT3		; Assume PT3 file type
-	CP	'3'			; Check for '3'
-	JR	Z,_SET			; If so, commit file type value
-	JP	ERRNAM			; Anything else is a bad file extension
-CHKMYM	LD	A,(FCB+9)		; Extension char 1
-	CP	'M'			; Check for 'M'
-	JP	NZ,ERRNAM		; If not, bad file extension
-	LD	A,(FCB+10)		; Extension char 2
-	CP	'Y'			; Check for 'Y'
-	JP	NZ,ERRNAM		; If not, bad file extension
-	LD	A,(FCB+11)		; Extension char 3
-	LD	C,TYPMYM		; Assume MYM file type
-	CP	'M'			; Check for 'M'
-	JR	Z,_SET			; If so, commit file type value
-	JP	ERRNAM			; Anything else is a bad file extension
-_SET	LD	A,C			; Get file type value
-	LD	(FILTYP),A		; Save file type value
+	; Detect file type using modular function
+	CALL	DETECT_FILE_TYPE	; A := detected file type
 ;
 	CALL	CLI_ABRT_UNSUPPFILTYP
 
@@ -271,12 +231,7 @@ _LD0	LD	C,15			; CPM Open File function
 	JP	Z,ERRFIL		; Handle file error
 ;
 	LD	A,(FILTYP)		; Get file type
-	LD	HL,MDLADDR		; Assume load address
-	LD	(DMA),HL		; ... for PTx files
-	CP	TYPMYM			; MYM file?
-	JR	NZ,_LD			; If not, all set
-	LD	HL,rows			; Otherwise, load address
-	LD	(DMA),HL		; ... for MYM files
+	CALL	CONFIGURE_FILE_LOAD_ADDRESS	; Set DMA based on file type
 ;
 _LD	LD	HL,(DMA)		; Get load address
 	PUSH	HL			; Save it
@@ -308,94 +263,7 @@ _LDX	LD	C,16			; CPM Close File function
 	;CALL	CRLF2			; Formatting
 	;CALL	SLOWCPU
 	LD	A,(FILTYP)		; Get file type
-	CP	TYPPT2			; PT2?
-	JR	Z,GOPT2			; If so, do it
-	CP	TYPPT3			; PT3?
-	JR	Z,GOPT3			; If so, do it
-	CP	TYPMYM			; MYM?
-	JR	Z,gomym			; If so, do it
-	JP	ERRNAM			; This should never happen
-
-GOPT2	LD	A,2			; SETUP value to PT2 sound files
-	LD	(START+10),A		; Save it
-	; Avg TS / quark for PT2 files has *not* been measured!!!
-	LD	DE,185			; Avg TS / quark = 7400, so 185 delay loops
-	JR	GOPTX			; Play PTx file
-
-GOPT3	LD	A,0			; SETUP value to PT3 sound files
-	LD	(START+10),A		; Save it
-	LD	DE,185			; Avg TS / quark = 7400, so 185 delay loops
-	JR	GOPTX			; Play PTx file
-
-GOPTX
-	LD	HL,(QDLY)		; Get basic quark delay
-	OR	A			; Clear carry
-	SBC	HL,DE			; Adjust for file type
-	LD	(QDLY),HL		; Save updated quark delay factor
-
-	CALL	CRLF2
-	LD	DE, MSGSONGNAME         ; Print song name message
-	CALL	PRTSTR
-	LD	DE, MDLADDR + $1E       ; Print 32 character long song name from module
-	LD	B, $20
-GOPTX1	LD	A,(DE)
-	CALL	PRTCHR
-	INC	DE
-	DJNZ	GOPTX1
-	CALL	CRLF
-	LD	DE, MSGARTIST           ; Print "by" message
-	CALL	PRTSTR
-	LD	DE, MDLADDR + $42       ; Print 32 character long composer/artist from module
-	LD	B,  $20
-GOPTX2	LD	A,(DE)
-	CALL	PRTCHR
-	INC	DE
-	DJNZ	GOPTX2
-	CALL	CRLF2			; Formatting
-	LD	DE,MSGPLY		; Playing message
-	CALL	PRTSTR			; Print message
-	CALL	START			; Do initialization
-PTXLP	CALL	START+5			; Play one quark
-	LD	A,(START+10)		; Get setup byte
-	BIT	7,A			; Check bit 7 (loop point passed)
-	JR	NZ,EXIT			; Bail out when done playing
-	CALL	GETKEY			; Check for keypress
-	JR	NZ,EXIT			; Abort on keypress
-	;LD	A,13			; Back to
-	;CALL	PRTCHR			; ... start of line
-	;LD	A,(CurPos)		; Get current position
-	;CALL	PRTHEX			; ... and display it
-	CALL	WAITQ			; Wait one quark period
-	JR	PTXLP			; Loop for next quark
-;
-gomym
-	CALL	CRLF2			; Formatting
-	LD	DE,MSGPLY		; Playing message
-	CALL	PRTSTR			; Print message
-	ld	hl,(QDLY)		; Get basic quark delay
-	or	a			; Clear carry
-	ld	de,125			; Avg TS / quark = ~5000, so 125 delay loops
-	sbc	hl,de			; Adjust for file type
-	ld	(QDLY),hl		; Save updated quark delay factor
-	;ld	bc,(rows)
-	;call	PRTHEXWORD
-	call	mymini			; Initialize player
-        call    extract         	; Unpack the first fragment
-mymlp	call	extract
-	jr	nc,EXIT			; CF clear at end of tune
-waitvb	call	WAITQ
-	call	upsg			; Update PSG registers
-	call	GETKEY			; Check for keypess
-	jr	nz,EXIT			; Bail out if so
-	ld      a,(played)      	; Wait until VBI has played a fragment
-        or      a
-        jr      nz,waitvb
-        ld      (psource),iy
-        ld      a,FRAG
-        ld      (played),a
-	;call	PRTDOT
-	jr	mymlp
-;
+	CALL	CONFIGURE_FILE_PLAYBACK	; Configure and start playback
 EXIT	CALL	START+8			; Mute audio
 	;CALL	NORMCPU
 	;CALL	CRLF2			; Formatting
@@ -409,6 +277,8 @@ EXIT	CALL	START+8			; Mute audio
 #include "src/cli/cli.inc"
 #include "src/utils/printing.inc"
 #include "src/ui/messages.inc"
+#include "src/io/filetype_detection.inc"
+#include "src/audio/filetype_config.inc"
 
 ;
 ; Get a keystroke from CPM
@@ -2719,6 +2589,11 @@ uncomp:
 rows:
 	.DS	2	; WORD value
 data:
+
+; VGM data storage (placeholder)
+vgmdata:
+	.DS	2	; VGM header storage (placeholder)
+vgmbuf:
 ;
 ;===============================================================================
 	.END
