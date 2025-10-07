@@ -74,9 +74,7 @@ HEAPEND		.EQU	$C000		; End of heap storage
 ;
 ; File type constants now defined in src/io/filetypes.inc
 ;
-PORTS_AUTO	.EQU	0		; AUTO select audio chip ports
-PORTS_MSX	.EQU	1		; force MSX audio chip ports
-PORTS_RC	.EQU	2		; force RCBUS audio chip ports
+; Port selection constants now defined in src/io/filetypes.inc
 ;
 ; HIGH SPEED CPU CONTROL
 ;
