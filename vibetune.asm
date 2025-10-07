@@ -70,7 +70,7 @@
 #include	"src/tune.inc"
 #include "src/io/filetypes.inc"
 ;
-HEAPEND		.EQU	$C000		; End of heap storage
+; HEAPEND constant now defined in src/io/filetypes.inc
 ;
 ; File type constants now defined in src/io/filetypes.inc
 ;

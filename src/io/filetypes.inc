@@ -14,4 +14,4 @@ PORTS_MSX	.EQU	1		; force MSX audio chip ports
 PORTS_RC	.EQU	2		; force RCBUS audio chip ports
 
 ; Memory and system constants
-HEAPEND		.EQU	$C000		; End of heap storage
+HEAPEND		.EQU	$C000		; End of heap storageHEAPEND		.EQU	$C000		; End of heap storage
