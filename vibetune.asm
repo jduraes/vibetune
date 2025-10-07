@@ -68,12 +68,11 @@
 #include	"src/system/hbios.inc"
 #include	"src/system/cpm.inc"
 #include	"src/tune.inc"
+#include "src/io/filetypes.inc"
 ;
 HEAPEND		.EQU	$C000		; End of heap storage
 ;
-TYPPT2		.EQU	1		; FILTYP value for PT2 sound file
-TYPPT3		.EQU	2		; FILTYP value for PT3 sound file
-TYPMYM		.EQU	3		; FILTYP value for MYM sound file
+; File type constants now defined in src/io/filetypes.inc
 ;
 PORTS_AUTO	.EQU	0		; AUTO select audio chip ports
 PORTS_MSX	.EQU	1		; force MSX audio chip ports
