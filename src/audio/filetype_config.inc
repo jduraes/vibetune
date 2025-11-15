@@ -6,7 +6,7 @@
 ;-------------------------------------------------------------------------------
 ; CONFIGURE_FILE_LOAD_ADDRESS  
 ; Sets the appropriate DMA load address based on file type
-; Input:  A = file type (TYPPT2, TYPPT3, TYPMYM, or TYPVGM)
+; Input:  A = file type (TYPPT2, TYPPT3, TYPMYM, TYPVGM, or TYPD00)
 ; Output: DMA variable set to appropriate load address
 ; Uses:   A, HL
 ;-------------------------------------------------------------------------------
@@ -17,6 +17,8 @@ CONFIGURE_FILE_LOAD_ADDRESS:
 	JR	Z,LOAD_MYM		; If so, set MYM address
 	CP	TYPVGM			; VGM file?
 	JR	Z,LOAD_VGM		; If so, set VGM address
+	CP	TYPD00			; D00 file?
+	JR	Z,LOAD_D00		; If so, set D00 address
 	RET				; Otherwise, use default
 LOAD_MYM:
 	LD	HL,rows			; MYM load address
@@ -26,11 +28,15 @@ LOAD_VGM:
 	LD	HL,vgmdata		; VGM load address
 	LD	(DMA),HL		; ... for VGM files
 	RET
+LOAD_D00:
+	LD	HL,d00data		; D00 load address
+	LD	(DMA),HL		; ... for D00 files
+	RET
 
 ;-------------------------------------------------------------------------------
 ; CONFIGURE_FILE_PLAYBACK
 ; Configures file-specific playback settings and starts appropriate player
-; Input:  A = file type (TYPPT2, TYPPT3, TYPMYM, or TYPVGM)
+; Input:  A = file type (TYPPT2, TYPPT3, TYPMYM, TYPVGM, or TYPD00)
 ; Uses:   A, DE, HL
 ;-------------------------------------------------------------------------------
 CONFIGURE_FILE_PLAYBACK:
@@ -42,6 +48,8 @@ CONFIGURE_FILE_PLAYBACK:
 	JR	Z,CONFIG_MYM		; If so, do it
 	CP	TYPVGM			; VGM?
 	JP	Z,CONFIG_VGM		; If so, do it (JP not JR - distance!)
+	CP	TYPD00			; D00?
+	JP	Z,CONFIG_D00		; If so, do it (JP not JR - distance!)
 	JP	ERRNAM			; This should never happen
 
 CONFIG_PT2:
@@ -129,6 +137,14 @@ CONFIG_MYM_EXIT:
 CONFIG_VGM:
 	CALL	CRLF2			; Formatting
 	LD	DE,MSGNOTVGM		; VGM not implemented message
+	CALL	PRTSTR			; Print message
+	CALL	CRLF			; Formatting
+	RET				; Return to main program for proper exit
+
+; D00 playback configuration - placeholder implementation
+CONFIG_D00:
+	CALL	CRLF2			; Formatting
+	LD	DE,MSGNOTD00		; D00 not implemented message
 	CALL	PRTSTR			; Print message
 	CALL	CRLF			; Formatting
 	RET				; Return to main program for proper exit

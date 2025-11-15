@@ -121,3 +121,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Deferred**: Audio engine modularization (requires more careful architectural analysis)
 - v0.2.6.8 (2025-10-07) - MAME verified build
 - v0.2.6.34 (2025-11-15) - VGM detection complete - Hardware verified on RC2014
+- v0.2.6.35 (2025-11-15) - D00 detection complete - Hardware verified on RC2014

@@ -266,7 +266,11 @@ _LDX	LD	C,16			; CPM Close File function
 	CALL	CONFIGURE_FILE_PLAYBACK	; Configure and start playback
 	LD	A,(FILTYP)		; Get file type again
 	CP	TYPVGM			; Is it VGM?
-EXIT	CALL	NZ,START+8		; Mute audio (skip for VGM)
+	JR	Z,EXIT			; Skip START+8 for VGM
+	CP	TYPD00			; Is it D00?
+	JR	Z,EXIT			; Skip START+8 for D00
+	CALL	START+8			; Mute audio for other formats
+EXIT	;
 	;CALL	NORMCPU
 	;CALL	CRLF2			; Formatting
 	LD	DE,MSGEND		; Completion message
@@ -2597,6 +2601,11 @@ data:
 vgmdata:
 	.DS	2	; VGM header storage (placeholder)
 vgmbuf:
+
+; D00 data storage (placeholder)
+d00data:
+	.DS	2	; D00 header storage (placeholder)
+d00buf:
 ;
 ;===============================================================================
 	.END
