@@ -1,7 +1,7 @@
 # VibeTune Project Rules (WARP.md)
 
-**Last Updated**: 2025-10-07  
-**Current Version**: 0.2.6.8
+**Last Updated**: 2025-11-15  
+**Current Version**: 0.2.6.27
 
 ## 📋 Development Rules
 

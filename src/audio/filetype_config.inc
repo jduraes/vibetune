@@ -6,7 +6,7 @@
 ;-------------------------------------------------------------------------------
 ; CONFIGURE_FILE_LOAD_ADDRESS  
 ; Sets the appropriate DMA load address based on file type
-; Input:  A = file type (TYPPT2, TYPPT3, or TYPMYM)
+; Input:  A = file type (TYPPT2, TYPPT3, TYPMYM, or TYPVGM)
 ; Output: DMA variable set to appropriate load address
 ; Uses:   A, HL
 ;-------------------------------------------------------------------------------
@@ -30,7 +30,7 @@ LOAD_VGM:
 ;-------------------------------------------------------------------------------
 ; CONFIGURE_FILE_PLAYBACK
 ; Configures file-specific playback settings and starts appropriate player
-; Input:  A = file type (TYPPT2, TYPPT3, or TYPMYM)
+; Input:  A = file type (TYPPT2, TYPPT3, TYPMYM, or TYPVGM)
 ; Uses:   A, DE, HL
 ;-------------------------------------------------------------------------------
 CONFIGURE_FILE_PLAYBACK:
@@ -41,7 +41,7 @@ CONFIGURE_FILE_PLAYBACK:
 	CP	TYPMYM			; MYM?
 	JR	Z,CONFIG_MYM		; If so, do it
 	CP	TYPVGM			; VGM?
-	JR	Z,CONFIG_VGM		; If so, do it
+	JP	Z,CONFIG_VGM		; If so, do it (JP not JR - distance!)
 	JP	ERRNAM			; This should never happen
 
 CONFIG_PT2:
@@ -93,10 +93,6 @@ PTXLP	CALL	START+5			; Play one quark
 	JR	NZ,CONFIG_PTX_EXIT	; Bail out when done playing
 	CALL	GETKEY			; Check for keypress
 	JR	NZ,CONFIG_PTX_EXIT	; Abort on keypress
-	;LD	A,13			; Back to
-	;CALL	PRTCHR			; ... start of line
-	;LD	A,(CurPos)		; Get current position
-	;CALL	PRTHEX			; ... and display it
 	CALL	WAITQ			; Wait one quark period
 	JR	PTXLP			; Loop for next quark
 CONFIG_PTX_EXIT:
@@ -111,8 +107,6 @@ CONFIG_MYM:
 	LD	DE,125			; Avg TS / quark = ~5000, so 125 delay loops
 	SBC	HL,DE			; Adjust for file type
 	LD	(QDLY),HL		; Save updated quark delay factor
-	;LD	BC,(rows)
-	;CALL	PRTHEXWORD
 	CALL	mymini			; Initialize player
         CALL    extract         	; Unpack the first fragment
 MYMLP	CALL	extract
@@ -127,7 +121,6 @@ WAITVB	CALL	WAITQ
         LD      (psource),IY
         LD      A,FRAG
         LD      (played),A
-	;CALL	PRTDOT
 	JR	MYMLP
 CONFIG_MYM_EXIT:
 	RET				; Return to main program for proper exit
@@ -137,6 +130,5 @@ CONFIG_VGM:
 	CALL	CRLF2			; Formatting
 	LD	DE,MSGNOTVGM		; VGM not implemented message
 	CALL	PRTSTR			; Print message
-	JP	EXIT			; Exit for now
-
-	RET				; Should never reach here
+	CALL	CRLF			; Formatting
+	RET				; Return to main program for proper exit

@@ -21,21 +21,17 @@ increment-version:
 	NEW_VERSION="$$MAJOR.$$MINOR.$$PATCH.$$NEW_BUILD"; \
 	echo "New version: $$NEW_VERSION"; \
 	echo "$$NEW_VERSION" > VERSION; \
-	sed -i '' "s/VibeTune v$$CURRENT_VERSION/VibeTune v$$NEW_VERSION/g" src/ui/messages.inc; \
-	sed -i '' "s/v$$CURRENT_VERSION/v$$NEW_VERSION/g" README.md; \
-	sed -i '' "s/v$$CURRENT_VERSION/v$$NEW_VERSION/g" PROJECT_STATUS.md; \
-	sed -i '' "s/$$CURRENT_VERSION/$$NEW_VERSION/g" WARP.md; \
-	sed -i '' "s/VibeTune v[0-9]\+\.[0-9]\+\.[0-9]\+\.[0-9]\+ -/VibeTune v$$NEW_VERSION -/g" Makefile
+	sed -i "s/v$$CURRENT_VERSION/v$$NEW_VERSION/g" README.md; \
+	sed -i "s/v$$CURRENT_VERSION/v$$NEW_VERSION/g" PROJECT_STATUS.md; \
+	sed -i "s/$$CURRENT_VERSION/$$NEW_VERSION/g" WARP.md; \
+	sed -i "s/VibeTune v[0-9]\+\.[0-9]\+\.[0-9]\+\.[0-9]\+ -/VibeTune v$$NEW_VERSION -/g" Makefile
 
 vibetune.com: $(DEPS)
-	@echo "\n=== Updating build date ==="
-	@CURRENT_VERSION=$$(cat VERSION); \
-	BUILD_DATE=$$(date "+%d-%b-%Y"); \
-	sed "s/VibeTune v$$CURRENT_VERSION for RomWBW, [0-9][0-9]-[A-Za-z][A-Za-z][A-Za-z]-[0-9][0-9][0-9][0-9]/VibeTune v$$CURRENT_VERSION for RomWBW, $$BUILD_DATE/g" vibetune.asm > vibetune_temp.asm && \
-	mv vibetune_temp.asm vibetune.asm
-	@echo "Build date updated to: $$(date "+%d-%b-%Y")"
+	@echo "\n=== Generating build metadata ==="
+	@bash build_meta.sh
 	$(TASM) -dWBW vibetune.asm vibetune.com vibetune.lst
 	@echo "\n=== Build successful! ==="
+	@echo "Version: $$(cat VERSION)"
 	@echo "Binary size: $$(wc -c < vibetune.com) bytes"
 
 # Emulator test target
@@ -77,8 +73,8 @@ commit:
 	@echo "\n=== Updating documentation and committing ==="
 	@CURRENT_VERSION=$$(cat VERSION); \
 	echo "Committing version $$CURRENT_VERSION"; \
-	sed -i '' "s/**Last Updated**: [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]/**Last Updated**: $$(date '+%Y-%m-%d')/g" WARP.md; \
-	sed -i '' "s/**Last Updated**: [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]/**Last Updated**: $$(date '+%Y-%m-%d')/g" PROJECT_STATUS.md; \
+	sed -i "s/**Last Updated**: [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]/**Last Updated**: $$(date '+%Y-%m-%d')/g" WARP.md; \
+	sed -i "s/**Last Updated**: [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]/**Last Updated**: $$(date '+%Y-%m-%d')/g" PROJECT_STATUS.md; \
 	echo "- v$$CURRENT_VERSION ($$(date '+%Y-%m-%d')) - MAME verified build" >> CHANGELOG.md; \
 	git add .; \
 	git commit -m "v$$CURRENT_VERSION - MAME verified build - Binary size: $$(wc -c < vibetune.com) bytes - All tests passed - MAME verification complete"; \
@@ -91,7 +87,7 @@ release: vibetune.com test deploy
 
 # Show available targets
 help:
-	@echo "VibeTune v0.2.6.3 - Available Make Targets:"
+	@echo "VibeTune - Available Make Targets:"
 	@echo ""
 	@echo "  vibetune.com  - Build the VibeTune executable"
 	@echo "  test          - Run emulator test with z88dk-ticks"
@@ -110,7 +106,7 @@ help:
 
 clean::
 	@echo "Cleaning VibeTune build artifacts..."
-	rm -f vibetune.com vibetune.lst
+	rm -f vibetune.com vibetune.lst src/build_meta.inc
 	@echo "✅ VibeTune clean completed"
 
 .PHONY: test deploy release help build increment-version commit

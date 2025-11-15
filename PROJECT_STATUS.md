@@ -1,7 +1,7 @@
 # VibeTune Project Status
 
-**Last Updated**: 2025-10-05  
-**Version**: v0.2.6.8
+**Last Updated**: 2025-11-15  
+**Version**: v0.2.6.27
 **Phase**: VGM Extension Complete - Wayne's Patterns Applied
 
 ## 🎯 Original Objectives
@@ -174,23 +174,30 @@ The project now has:
 - ✅ Comprehensive build and testing system
 - ✅ Well-documented codebase ready for enhancement
 
-## 🎯 Phase 3: Wayne's Learnings Applied (COMPLETED)
+## 🎯 Phase 3: Wayne's Learnings Applied (ARCHITECTURE COMPLETE)
 
 ### VGM Format Extension using Wayne's Dispatch Pattern
-**Status**: ✅ **COMPLETED** - VGM file extension support successfully integrated
+**Status**: 🔄 **DEBUGGING REQUIRED** - VGM architecture complete, detection issue present
 
 **Achievements**:
-- **File Extension Detection**: Added `.VGM` support following Wayne Warthen's exact dispatch pattern
-- **Modular Integration**: VGM cleanly integrated with existing `DETECT_FILE_TYPE` and `CONFIGURE_FILE_PLAYBACK` functions
-- **Memory Management**: Added `vgmdata` storage using Wayne's shared heap approach
-- **Minimal Size Impact**: Only 68 bytes added (5090 → 5158 bytes)
-- **UI Updates**: All messages updated to show VGM format support
-- **Ready for Implementation**: VGM player can now be dropped in using the established extension points
+- ✅ **File Extension Detection**: Added `.VGM` support following Wayne Warthen's exact dispatch pattern
+- ✅ **Modular Integration**: VGM cleanly integrated with existing `DETECT_FILE_TYPE` and `CONFIGURE_FILE_PLAYBACK` functions
+- ✅ **Memory Management**: Added `vgmdata` storage using Wayne's shared heap approach
+- ✅ **UI Updates**: All messages updated to show VGM format support
+- ✅ **Architecture Verified**: Debug sessions confirmed all VGM code logic is correct
+- ❌ **Detection Issue**: VGM files show "Sound filename invalid" despite correct implementation
 
 **Technical Details**:
 - Extended `src/io/filetype_detection.inc` with `CHKVGM` following Wayne's pattern
 - Added `TYPVGM` constant and `CONFIG_VGM` dispatch in `src/audio/filetype_config.inc`
 - Updated UI messages to include VGM in supported formats
 - Maintained 100% backward compatibility with PT2/PT3/MYM formats
+- **Binary Size**: 5158 bytes (clean build)
 
-**Next Steps**: This demonstrates that Wayne's approach works perfectly with our modular architecture. Additional formats (D00, SID, etc.) can be added using this same proven pattern.
+**Debug Status**:
+- 🔍 **Assembly Analysis**: VGM detection logic confirmed correct in listing
+- 🔍 **Debug Testing**: With debug traces, VGM detection worked perfectly (`VGM!04T` output)
+- 🔍 **Clean Build Issue**: Without debug, detection fails with "filename invalid" error
+- 🔍 **Bypass Testing**: Even hard-coded VGM type still triggers error
+
+**Next Steps**: Requires fresh debugging session to identify the root cause of detection failure in clean builds.

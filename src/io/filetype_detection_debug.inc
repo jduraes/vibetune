@@ -1,5 +1,5 @@
 ;===============================================================================
-; VibeTune File Type Detection Module
+; VibeTune File Type Detection Module - DEBUG VERSION
 ; Extracted from vibetune.asm for modularization
 ;===============================================================================
 
@@ -12,6 +12,15 @@
 ; Uses:   A, C
 ;-------------------------------------------------------------------------------
 DETECT_FILE_TYPE:
+	; DEBUG: Print FCB extension bytes
+	LD	A,(FCB+9)
+	CALL	PRTHEX
+	LD	A,(FCB+10)
+	CALL	PRTHEX
+	LD	A,(FCB+11)
+	CALL	PRTHEX
+	CALL	CRLF
+	
 	; Check sound filename (must be *.PT2, *.PT3, *.MYM, or *.VGM)
 	LD	A,(FCB+1)		; Get first char of filename
 	CP	' '			; Compare to blank
@@ -29,7 +38,7 @@ DETECT_FILE_TYPE:
 	JR	_SETTYPE
 HASEXT	LD	A,(FCB+9)		; Extension char 1
 	CP	'P'			; Check for 'P'
-	JR	NZ,CHKMYM		; If not, check for MYM extension
+	JP	NZ,CHKMYM		; If not, check for MYM extension
 	LD	A,(FCB+10)		; Extension char 2
 	CP	'T'			; Check for 'T'
 	JP	NZ,ERRNAM		; If not, bad file extension
@@ -43,7 +52,7 @@ HASEXT	LD	A,(FCB+9)		; Extension char 1
 	JP	ERRNAM			; Anything else is a bad file extension
 CHKMYM	LD	A,(FCB+9)		; Extension char 1
 	CP	'M'			; Check for 'M'
-	JR	NZ,CHKVGM		; If not, check for VGM extension
+	JP	NZ,CHKVGM		; If not, check for VGM extension
 	LD	A,(FCB+10)		; Extension char 2
 	CP	'Y'			; Check for 'Y'
 	JP	NZ,ERRNAM		; If not, bad file extension
@@ -54,10 +63,10 @@ CHKMYM	LD	A,(FCB+9)		; Extension char 1
 	JP	ERRNAM			; Anything else is a bad file extension
 CHKVGM	LD	A,(FCB+9)		; Extension char 1
 	CP	'V'			; Check for 'V'
-	JR	NZ,ERRNAM		; If not, bad file extension
+	JP	NZ,ERRNAM		; If not, bad file extension
 	LD	A,(FCB+10)		; Extension char 2
 	CP	'G'			; Check for 'G'
-	JR	NZ,ERRNAM		; If not, bad file extension
+	JP	NZ,ERRNAM		; If not, bad file extension
 	LD	A,(FCB+11)		; Extension char 3
 	LD	C,TYPVGM		; Assume VGM file type
 	CP	'M'			; Check for 'M'

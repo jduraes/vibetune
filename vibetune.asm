@@ -264,7 +264,9 @@ _LDX	LD	C,16			; CPM Close File function
 	;CALL	SLOWCPU
 	LD	A,(FILTYP)		; Get file type
 	CALL	CONFIGURE_FILE_PLAYBACK	; Configure and start playback
-EXIT	CALL	START+8			; Mute audio
+	LD	A,(FILTYP)		; Get file type again
+	CP	TYPVGM			; Is it VGM?
+EXIT	CALL	NZ,START+8		; Mute audio (skip for VGM)
 	;CALL	NORMCPU
 	;CALL	CRLF2			; Formatting
 	LD	DE,MSGEND		; Completion message
@@ -276,6 +278,7 @@ EXIT	CALL	START+8			; Mute audio
 #include "src/utils/strings.inc"
 #include "src/cli/cli.inc"
 #include "src/utils/printing.inc"
+#include "src/build_meta.inc"
 #include "src/ui/messages.inc"
 #include "src/io/filetype_detection.inc"
 #include "src/audio/filetype_config.inc"
