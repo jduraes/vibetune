@@ -57,7 +57,7 @@ VGM_OPL2:
 	POP	BC
 	LD	E,(HL)			; Get data into E
 	POP	AF			; Restore register to A
-	CALL	VGM_BOOST_VOLUME	; Boost if volume register
+;	CALL	VGM_BOOST_VOLUME	; DISABLED - causes noise	; Boost if volume register
 	LD	A,E			; Get (possibly boosted) data
 	INC	HL
 	OUT	(OPL3DATA1),A		; Write data
@@ -77,7 +77,7 @@ VGM_OPL31:
 	POP	BC
 	LD	E,(HL)
 	POP	AF
-	CALL	VGM_BOOST_VOLUME
+;	CALL	VGM_BOOST_VOLUME	; DISABLED - causes noise
 	LD	A,E
 	INC	HL
 	OUT	(OPL3DATA1),A		; Write data
@@ -97,7 +97,7 @@ VGM_OPL32:
 	POP	BC
 	LD	E,(HL)
 	POP	AF
-	CALL	VGM_BOOST_VOLUME
+;	CALL	VGM_BOOST_VOLUME	; DISABLED - causes noise
 	LD	A,E
 	INC	HL
 	OUT	(OPL3DATA2),A		; Write data
