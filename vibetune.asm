@@ -278,6 +278,16 @@ EXIT	;
 	CALL	CRLF			; Formatting
 	JP	0			; Exit the easy way
 
+; VGM-specific hardware ports (fixed addresses for multi-chip/OPL3 support)
+RSEL2		.EQU	0A0H	; Secondary AY-3-8910 register select
+RDAT2		.EQU	0A1H	; Secondary AY-3-8910 register data
+PSGREG		.EQU	0FFH	; Primary SN76489 data port
+PSG2REG		.EQU	0FBH	; Secondary SN76489 data port
+OPL3ADDR1	.EQU	090H	; OPL3 bank 1 register select
+OPL3DATA1	.EQU	091H	; OPL3 bank 1 data
+OPL3ADDR2	.EQU	092H	; OPL3 bank 2 register select
+OPL3DATA2	.EQU	093H	; OPL3 bank 2 data
+
 #include "src/utils/timing.inc"
 #include "src/utils/strings.inc"
 #include "src/cli/cli.inc"
@@ -286,6 +296,7 @@ EXIT	;
 #include "src/ui/messages.inc"
 #include "src/io/filetype_detection.inc"
 #include "src/audio/filetype_config.inc"
+#include "src/audio/vgm_player.inc"
 
 ;
 ; Get a keystroke from CPM
@@ -584,6 +595,17 @@ DELAYMD		.DB	0	; FORCE DELAY MODE IF TRUE (NON-ZERO)
 OCTAVEADJ	.DB	0	; AMOUNT TO ADJUST OCTAVE UP OR DOWN
 
 USEPORTS	.DB	0	; AUDIO CHIP PORT SELECTION MODE
+;
+; VGM-specific hardware ports (fixed addresses for multi-chip/OPL3 support)
+; Note: Primary AY chip uses dynamic RSEL/RDAT from CFG structure
+RSEL2		.EQU	0A0H	; Secondary AY-3-8910 register select (MSX std)
+RDAT2		.EQU	0A1H	; Secondary AY-3-8910 register data (MSX std)
+PSGREG		.EQU	0FFH	; Primary SN76489 data port
+PSG2REG		.EQU	0FBH	; Secondary SN76489 data port
+OPL3ADDR1	.EQU	090H	; OPL3 bank 1 register select
+OPL3DATA1	.EQU	091H	; OPL3 bank 1 data
+OPL3ADDR2	.EQU	092H	; OPL3 bank 2 register select
+OPL3DATA2	.EQU	093H	; OPL3 bank 2 data
 ;
 ; Hardware description strings
 HWSTR_SCG	.DB	"SCG ECB Board",0
@@ -2511,6 +2533,12 @@ dest1	.dw	0       	; Uncompress destination 1
 dest2	.dw	0       	; - " -                  2
 psource	.dw	0       	; Playing offset for the VB-player
 prows	.dw	0       	; Rows played so far
+
+; VGM playback variables
+vgmpos	.dw	0       	; Current position in VGM data stream
+vgmdly	.dw	0       	; Sample delay counter for VGM timing
+vgmfdly	.db	15      	; Frame delay calibration (CPU speed dependent)
+
 
 ; Bits per PSG register
 regbits	.db	8,4,8,4,8,4,5,8,5,5,5,8,8,8

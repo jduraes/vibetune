@@ -16,5 +16,5 @@ PORTS_MSX	.EQU	1		; force MSX audio chip ports
 PORTS_RC	.EQU	2		; force RCBUS audio chip ports
 
 ; Memory and system constants
-HEAPEND		.EQU	$C000		; End of heap storage
+HEAPEND		.EQU	$E000		; End of heap storage (increased for VGM files)
 #DEFINE Release "1"		; Release number

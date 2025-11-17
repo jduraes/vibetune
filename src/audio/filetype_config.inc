@@ -136,12 +136,60 @@ CONFIG_MYM_EXIT:
 ; VGM playback configuration - placeholder implementation
 CONFIG_VGM:
 	CALL	CRLF2			; Formatting
-	LD	DE,MSGNOTVGM		; VGM not implemented message
+	LD	DE,MSGPLY		; Playing message
 	CALL	PRTSTR			; Print message
-	CALL	CRLF			; Formatting
+	
+	; Calculate dynamic frame delay based on CPU speed
+	LD	HL,(QDLY)		; CPU_KHz/2
+	ADD	HL,HL			; Restore full CPU speed in KHz
+	SRL	H			; Divide by 2
+	RR	L
+	SRL	H			; Divide by 4
+	RR	L
+	SRL	H			; Divide by 8 (~CPU_MHz * 2)
+	RR	L
+	LD	A,L			; Get result
+	LD	B,A			; Save original
+	SRL	A			; Divide by 2
+	SRL	A			; Divide by 4
+	SRL	A			; Divide by 8 (12.5%)
+	ADD	A,B			; Add back = 112.5%
+	CP	10			; Check minimum
+	JR	NC,VGM_FDLY_OK
+	LD	A,10			; Use minimum
+VGM_FDLY_OK:
+	LD	(vgmfdly),A		; Save frame delay
+	; Initialize VGM playback
+	CALL	VGM_MUTE_ALL		; Reset hardware
+	LD	HL,(vgmdata + 34H)	; Get VGM data start offset from header
+	LD	A,H
+	OR	L
+	JR	NZ,VGM_START1
+	LD	HL,000CH		; Default location if offset is 0
+VGM_START1:
+	LD	DE,vgmdata + 34H
+	ADD	HL,DE			; Calculate absolute start position
+	LD	(vgmpos),HL		; Save start position
+	LD	HL,735			; Default delay (60Hz frame)
+	LD	(vgmdly),HL		; Initialize delay
+
+VGM_MAINLOOP:
+	CALL	VGM_PLAY_FRAME
+	JR	Z,VGM_EXIT		; Exit if end of file (Z set by VGM_PLAY_FRAME)
+	
+	; Check for keypress
+	CALL	GETKEY			; Check for key
+	JR	NZ,VGM_EXIT		; Exit if key pressed
+	
+	; Apply frame delay
+	CALL	VGM_APPLY_DELAY		; Wait for frame timing
+	
+	JR	VGM_MAINLOOP		; Loop
+
+VGM_EXIT:
+	CALL	VGM_MUTE_ALL		; Silence all hardware
 	RET				; Return to main program for proper exit
 
-; D00 playback configuration - placeholder implementation
 CONFIG_D00:
 	CALL	CRLF2			; Formatting
 	LD	DE,MSGNOTD00		; D00 not implemented message

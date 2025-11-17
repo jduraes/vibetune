@@ -114,3 +114,5 @@ clean::
 all::
 	mkdir -p $(DEST)/Tunes
 	cp Tunes/* $(DEST)/Tunes
+	mkdir -p $(DEST)/music
+	cp music/* $(DEST)/music
