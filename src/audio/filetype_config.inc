@@ -158,6 +158,12 @@ CONFIG_VGM:
 	JR	NC,VGM_FDLY_OK
 	LD	A,10			; Use minimum
 VGM_FDLY_OK:
+	; Multiply by 10 for proper timing
+	LD	B,A			; Save A
+	ADD	A,A			; x2
+	ADD	A,A			; x4
+	ADD	A,B			; x5
+	ADD	A,A			; x10
 	LD	(vgmfdly),A		; Save frame delay
 	; Initialize VGM playback
 	CALL	VGM_MUTE_ALL		; Reset hardware
