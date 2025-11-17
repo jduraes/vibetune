@@ -49,12 +49,16 @@ VGM_OPL2:
 	JR	NZ,VGM_OPL31
 	LD	A,(HL)			; Get register
 	INC	HL
+	PUSH	AF			; Save register
 	OUT	(OPL3ADDR1),A		; Select register
 	PUSH	BC
 	LD	B,3
 	DJNZ	$
 	POP	BC
-	LD	A,(HL)			; Get data
+	LD	E,(HL)			; Get data into E
+	POP	AF			; Restore register to A
+	CALL	VGM_BOOST_VOLUME	; Boost if volume register
+	LD	A,E			; Get (possibly boosted) data
 	INC	HL
 	OUT	(OPL3DATA1),A		; Write data
 	LD	(vgmpos),HL		; Save position after data bytes
@@ -65,12 +69,16 @@ VGM_OPL31:
 	JR	NZ,VGM_OPL32
 	LD	A,(HL)			; Get register
 	INC	HL
+	PUSH	AF
 	OUT	(OPL3ADDR1),A		; Select register
 	PUSH	BC
 	LD	B,3
 	DJNZ	$
 	POP	BC
-	LD	A,(HL)			; Get data
+	LD	E,(HL)
+	POP	AF
+	CALL	VGM_BOOST_VOLUME
+	LD	A,E
 	INC	HL
 	OUT	(OPL3DATA1),A		; Write data
 	LD	(vgmpos),HL		; Save position after data bytes
@@ -81,12 +89,16 @@ VGM_OPL32:
 	JR	NZ,VGM_PSG
 	LD	A,(HL)			; Get register
 	INC	HL
+	PUSH	AF
 	OUT	(OPL3ADDR2),A		; Select register
 	PUSH	BC
 	LD	B,3
 	DJNZ	$
 	POP	BC
-	LD	A,(HL)			; Get data
+	LD	E,(HL)
+	POP	AF
+	CALL	VGM_BOOST_VOLUME
+	LD	A,E
 	INC	HL
 	OUT	(OPL3DATA2),A		; Write data
 	LD	(vgmpos),HL		; Save position after data bytes
@@ -195,6 +207,34 @@ VGM_DELAY_LOOP:
 	LD	A,H
 	OR	L
 	JR	NZ,VGM_DELAY_LOOP	; Loop until delay complete
+	RET
+
+
+;===============================================================================
+; VGM_BOOST_VOLUME - Boost OPL volume if writing to volume register
+;===============================================================================
+; Checks if A (register) is 0x40-0x55 and reduces attenuation in E (data)
+; Input: A = register, E = data
+; Output: E = boosted data if volume register
+; Uses: HL (preserved via stack)
+;===============================================================================
+VGM_BOOST_VOLUME:
+	CP	40H
+	RET	C			; < 0x40, not volume
+	CP	56H
+	RET	NC			; >= 0x56, not volume
+	; Volume register - reduce attenuation (bits 0-5)
+	PUSH	HL
+	LD	A,E			; Get data
+	AND	3FH			; Mask attenuation (0-63)
+	SRL	A			; Divide by 2
+	SRL	A			; Divide by 4 (4x louder)
+	LD	L,A			; Save scaled
+	LD	A,E
+	AND	0C0H			; Keep upper bits
+	OR	L			; Combine
+	LD	E,A			; Store back
+	POP	HL
 	RET
 
 ;===============================================================================
