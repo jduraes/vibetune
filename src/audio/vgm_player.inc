@@ -130,11 +130,18 @@ VGM_AY:
 	BIT	7,A			; Bit 7=1 for second AY chip
 	JR	Z,VGM_AY1
 	AND	7FH			; Clear chip select bit
-	OUT	(RSEL2),A		; Select register on chip 2
+	LD	C,A			; Save register
+	PUSH	HL		; Save data pointer
+	LD	DE,(PORTS2)	; E=RSEL2, D=RDAT2
+	LD	A,C			; Restore register
+	LD	C,E			; C = RSEL2 port
+	OUT	(C),A		; Select register on chip 2
+	POP	HL		; Restore data pointer
 	LD	A,(HL)			; Get data
 	INC	HL
-	LD	(vgmpos),HL		; Save position after data bytes
-	OUT	(RDAT2),A		; Write data to chip 2
+	LD	(vgmpos),HL		; Save position
+	LD	C,D			; C = RDAT2 port
+	OUT	(C),A		; Write data to chip 2
 	JP	VGM_NEXT
 
 VGM_AY1:
@@ -279,24 +286,26 @@ VGM_MUTE_ALL:
 	OUT	(PSG2REG),A
 
 	; Mute AY-3-8910 channels (both chips)
-	LD	A,8			; Mixer register for channel A
-	OUT	(RSEL),A
-	OUT	(RSEL2),A
+	LD	DE,(PORTS)	; E=RSEL, D=RDAT
+	LD	HL,(PORTS2)	; L=RSEL2, H=RDAT2
+	
+	; Mute volume registers 8, 9, 10 on both chips
+	LD	B,3			; 3 channels
+	LD	A,8			; Start at register 8
+VGM_MUTE_LOOP:
+	PUSH	AF		; Save register number
+	LD	C,E			; C = RSEL port
+	OUT	(C),A		; Select register on chip 1
+	LD	C,L			; C = RSEL2 port
+	OUT	(C),A		; Select register on chip 2
 	XOR	A			; Volume = 0
-	OUT	(RDAT),A
-	OUT	(RDAT2),A
-	LD	A,9			; Mixer register for channel B
-	OUT	(RSEL),A
-	OUT	(RSEL2),A
-	XOR	A
-	OUT	(RDAT),A
-	OUT	(RDAT2),A
-	LD	A,10			; Mixer register for channel C
-	OUT	(RSEL),A
-	OUT	(RSEL2),A
-	XOR	A
-	OUT	(RDAT),A
-	OUT	(RDAT2),A
+	LD	C,D			; C = RDAT port
+	OUT	(C),A		; Write to chip 1
+	LD	C,H			; C = RDAT2 port
+	OUT	(C),A		; Write to chip 2
+	POP	AF		; Restore register
+	INC	A			; Next channel
+	DJNZ	VGM_MUTE_LOOP
 
 	; Turn off all OPL keys (0xB0-0xB8 on both banks = 18 channels)
 	LD	C,0B0H			; Start at key-on register

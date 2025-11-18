@@ -286,9 +286,8 @@ EXIT	;
 	JP	0			; Exit the easy way
 
 ; VGM-specific hardware ports (fixed addresses for multi-chip/OPL3 support)
-RSEL2		.EQU	0A0H	; Secondary AY-3-8910 register select
-RDAT2		.EQU	0A1H	; Secondary AY-3-8910 register data
-PSGREG		.EQU	0FFH	; Primary SN76489 data port
+PORTS2:
+RSEL2		.DB	0	; Secondary AY-3-8910 register select
 PSG2REG		.EQU	0FBH	; Secondary SN76489 data port
 OPL3ADDR1	.EQU	090H	; OPL3 bank 1 register select
 OPL3DATA1	.EQU	091H	; OPL3 bank 1 data
@@ -476,89 +475,89 @@ ERR2:	; without the string
 ;
 ; CONFIG TABLE, ENTRY ORDER MATCHES HBIOS PLATFORM ID
 ;
-CFGTBL:	;	PLT	RSEL	RDAT	RIN	Z180	ACR	ACRVAL
+CFGTBL:	;	PLT	RSEL	RDAT	RIN	Z180	ACR	ACRVAL	RSEL2	RDAT2
 	;	DESC
-	.DB	$01,	$9A,	$9B,	$9A,	$FF,	$9C,	$FF	; SBC W/ SCG
+	.DB	$01,	$9A,	$9B,	$9A,	$FF,	$9C,	$FF,	$FF,	$FF	;  SBC W/ SCG
 	.DW	HWSTR_SCG
 ;
 CFGSIZ	.EQU	$ - CFGTBL
 ;
-	.DB	$04,	$9C,	$9D,	$9C,	$40,	$FF,	$FF	; N8 W/ ONBOARD PSG
+	.DB	$04,	$9C,	$9D,	$9C,	$40,	$FF,	$FF,	$FF,	$FF	;  N8 W/ ONBOARD PSG
 	.DW	HWSTR_N8
 ;
-	.DB	$05,	$9A,	$9B,	$9A,	$40,	$9C,	$FF	; MK4 W/ SCG
+	.DB	$05,	$9A,	$9B,	$9A,	$40,	$9C,	$FF,	$FF,	$FF	;  MK4 W/ SCG
 	.DW	HWSTR_SCG
 ;
-	.DB	$07,	$A0,	$A1,	$A2,	$FF,	$FF,	$FF	; RCZ80 W/ RC SOUND MODULE (MSX)
+	.DB	$07,	$A0,	$A1,	$A2,	$FF,	$FF,	$FF,	$FF,	$FF	;  RCZ80 W/ RC SOUND MODULE (MSX)
 	.DW	HWSTR_RCMSX
 ;
-	.DB	$07,	$D8,	$D0,	$D8,	$FF,	$FF,	$FF	; RCZ80 W/ RC SOUND MODULE (EB)
+	.DB	$07,	$D8,	$D0,	$D8,	$FF,	$FF,	$FF,	$FF,	$FF	;  RCZ80 W/ RC SOUND MODULE (EB)
 	.DW	HWSTR_RCEB
 ;
-	.DB	$07,	$D1,	$D0,	$D0,	$FF,	$FF,	$FF	; RCZ80 W/ RC SOUND MODULE (MF)
+	.DB	$07,	$D1,	$D0,	$D0,	$FF,	$FF,	$FF,	$FF,	$FF	;  RCZ80 W/ RC SOUND MODULE (MF)
 	.DW	HWSTR_RCMF
 ;
-	.DB	$07,	$33,	$32,	$32,	$FF,	$FF,	$FF	; RCZ80 W/ LINC SOUND MODULE
+	.DB	$07,	$33,	$32,	$32,	$FF,	$FF,	$FF,	$FF,	$FF	;  RCZ80 W/ LINC SOUND MODULE
 	.DW	HWSTR_LINC
 ;
-	.DB	$08,	$A0,	$A1,	$A2,	$C0,	$FF,	$FF	; RCZ180 W/ RC SOUND MODULE (MSX)
+	.DB	$08,	$A0,	$A1,	$A2,	$C0,	$FF,	$FF,	$FF,	$FF	;  RCZ180 W/ RC SOUND MODULE (MSX)
 	.DW	HWSTR_RCMSX
 ;
-	.DB	$08,	$68,	$60,	$68,	$C0,	$FF,	$FF	; RCZ180 W/ RC SOUND MODULE (EB)
+	.DB	$08,	$68,	$60,	$68,	$C0,	$FF,	$FF,	$FF,	$FF	;  RCZ180 W/ RC SOUND MODULE (EB)
 	.DW	HWSTR_RCEB
 ;
-	.DB	$08,	$61,	$60,	$60,	$C0,	$FF,	$FF	; RCZ180 W/ RC SOUND MODULE (MF)
+	.DB	$08,	$61,	$60,	$60,	$C0,	$FF,	$FF,	$FF,	$FF	;  RCZ180 W/ RC SOUND MODULE (MF)
 	.DW	HWSTR_RCMF
 ;
-	.DB	$08,	$33,	$32,	$32,	$C0,	$FF,	$FF	; RCZ180 W/ LINC SOUND MODULE
+	.DB	$08,	$33,	$32,	$32,	$C0,	$FF,	$FF,	$FF,	$FF	;  RCZ180 W/ LINC SOUND MODULE
 	.DW	HWSTR_LINC
 ;
-	.DB	$09,	$A0,	$A1,	$A2,	$FF,	$FF,	$FF	; EZZ80 W/ RC SOUND MODULE (MSX)
+	.DB	$09,	$A0,	$A1,	$A2,	$FF,	$FF,	$FF,	$FF,	$FF	;  EZZ80 W/ RC SOUND MODULE (MSX)
 	.DW	HWSTR_RCMSX
 ;
-	.DB	$09,	$D8,	$D0,	$D8,	$FF,	$FF,	$FF	; EZZ80 W/ RC SOUND MODULE (EB)
+	.DB	$09,	$D8,	$D0,	$D8,	$FF,	$FF,	$FF,	$FF,	$FF	;  EZZ80 W/ RC SOUND MODULE (EB)
 	.DW	HWSTR_RCEB
 ;
-	.DB	$09,	$D1,	$D0,	$D0,	$FF,	$FF,	$FF	; EZZ80 W/ RC SOUND MODULE (MF)
+	.DB	$09,	$D1,	$D0,	$D0,	$FF,	$FF,	$FF,	$FF,	$FF	;  EZZ80 W/ RC SOUND MODULE (MF)
 	.DW	HWSTR_RCMF
 ;
-	.DB	$09,	$33,	$32,	$32,	$FF,	$FF,	$FF	; EZZ80 W/ LINC SOUND MODULE
+	.DB	$09,	$33,	$32,	$32,	$FF,	$FF,	$FF,	$FF,	$FF	;  EZZ80 W/ LINC SOUND MODULE
 	.DW	HWSTR_LINC
 ;
-	.DB	$0A,	$A0,	$A1,	$A2,	$C0,	$FF,	$FF	; SCZ180 W/ RC SOUND MODULE (MSX)
+	.DB	$0A,	$A0,	$A1,	$A2,	$C0,	$FF,	$FF,	$FF,	$FF	;  SCZ180 W/ RC SOUND MODULE (MSX)
 	.DW	HWSTR_RCMSX
 ;
-	.DB	$0A,	$68,	$60,	$68,	$C0,	$FF,	$FF	; SCZ180 W/ RC SOUND MODULE (EB)
+	.DB	$0A,	$68,	$60,	$68,	$C0,	$FF,	$FF,	$FF,	$FF	;  SCZ180 W/ RC SOUND MODULE (EB)
 	.DW	HWSTR_RCEB
 ;
-	.DB	$0A,	$61,	$60,	$60,	$C0,	$FF,	$FF	; SCZ180 W/ RC SOUND MODULE (MF)
+	.DB	$0A,	$61,	$60,	$60,	$C0,	$FF,	$FF,	$FF,	$FF	;  SCZ180 W/ RC SOUND MODULE (MF)
 	.DW	HWSTR_RCMF
 ;
-	.DB	$0A,	$33,	$32,	$32,	$C0,	$FF,	$FF	; SCZ180 W/ LINC SOUND MODULE
+	.DB	$0A,	$33,	$32,	$32,	$C0,	$FF,	$FF,	$FF,	$FF	;  SCZ180 W/ LINC SOUND MODULE
 	.DW	HWSTR_LINC
 ;
-	.DB	$0B,	$A0,	$A1,	$A2,	$FF,	$FF,	$FF	; RCZ280 W/ RC SOUND MODULE (MSX)
+	.DB	$0B,	$A0,	$A1,	$A2,	$FF,	$FF,	$FF,	$FF,	$FF	;  RCZ280 W/ RC SOUND MODULE (MSX)
 	.DW	HWSTR_RCMSX
 ;
-	.DB	$0B,	$D8,	$D0,	$D8,	$FF,	$FF,	$FF	; RCZ280 W/ RC SOUND MODULE (EB)
+	.DB	$0B,	$D8,	$D0,	$D8,	$FF,	$FF,	$FF,	$FF,	$FF	;  RCZ280 W/ RC SOUND MODULE (EB)
 	.DW	HWSTR_RCEB
 ;
-	.DB	$0B,	$D1,	$D0,	$D0,	$FF,	$FF,	$FF	; RCZ280 W/ RC SOUND MODULE (MF)
+	.DB	$0B,	$D1,	$D0,	$D0,	$FF,	$FF,	$FF,	$FF,	$FF	;  RCZ280 W/ RC SOUND MODULE (MF)
 	.DW	HWSTR_RCMF
 ;
-	.DB	$0B,	$33,	$32,	$32,	$FF,	$FF,	$FF	; RCZ280 W/ LINC SOUND MODULE
+	.DB	$0B,	$33,	$32,	$32,	$FF,	$FF,	$FF,	$FF,	$FF	;  RCZ280 W/ LINC SOUND MODULE
 	.DW	HWSTR_LINC
 ;
-	.DB	13,	$A0,	$A1,	$A0,	$FF,	$A2,	$FE	; MBC
+	.DB	13,	$A0,	$A1,	$A0,	$FF,	$A2,	$FE,	$FF,	$FF	;  MBC
 	.DW	HWSTR_MBC
 ;
-	.DB	17,	$A4,	$A5,	$A4,	$FF,	$A6,	$FE	; DUODYNE
+	.DB	17,	$A4,	$A5,	$A4,	$FF,	$A6,	$FE,	$FF,	$FF	;  DUODYNE
 	.DW	HWSTR_DUO
 ;
-	.DB	18,	$A0,	$A1,	$A2,	$FF,	$FF,	$FF	; HEATH H8
+	.DB	18,	$A0,	$A1,	$A2,	$FF,	$FF,	$FF,	$FF,	$FF	;  HEATH H8
 	.DW	HWSTR_HEATH
 ;
-	.DB	22,	$41,	$40,	$40,	$FF,	$FF,	$FF	; NABU
+	.DB	22,	$41,	$40,	$40,	$FF,	$FF,	$FF,	$FF,	$FF	;  NABU
 	.DW	HWSTR_NABU
 ;
 	.DB	$FF					; END OF TABLE MARKER
@@ -583,6 +582,9 @@ RIN		.DB	0	; Register input port
 Z180		.DB	0	; Z180 base I/O port
 ACR		.DB	0	; Aux Ctrl Reg I/O port (ACR)
 ACRVAL		.DB	0	; ACR sound enable value
+PORTS2:
+RSEL2		.DB	0	; Secondary AY register select port
+RDAT2		.DB	0	; Secondary AY register data port
 DESC		.DW	0	; Hardware description string adr
 ;
 CURPLT		.DB	0	; Current platform id reported by HBIOS
@@ -605,10 +607,8 @@ USEPORTS	.DB	0	; AUDIO CHIP PORT SELECTION MODE
 ;
 ; VGM-specific hardware ports (fixed addresses for multi-chip/OPL3 support)
 ; Note: Primary AY chip uses dynamic RSEL/RDAT from CFG structure
-RSEL2		.EQU	0A0H	; Secondary AY-3-8910 register select (MSX std)
-RDAT2		.EQU	0A1H	; Secondary AY-3-8910 register data (MSX std)
-PSGREG		.EQU	0FFH	; Primary SN76489 data port
-PSG2REG		.EQU	0FBH	; Secondary SN76489 data port
+PORTS2:
+RSEL2		.DB	0	; Secondary AY-3-8910 register select
 OPL3ADDR1	.EQU	090H	; OPL3 bank 1 register select
 OPL3DATA1	.EQU	091H	; OPL3 bank 1 data
 OPL3ADDR2	.EQU	092H	; OPL3 bank 2 register select
