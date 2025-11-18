@@ -57,7 +57,7 @@ VGM_OPL2:
 	POP	BC
 	LD	E,(HL)			; Get data into E
 	POP	AF			; Restore register to A
-;	CALL	VGM_BOOST_VOLUME	; DISABLED - causes noise	; Boost if volume register
+	CALL	VGM_BOOST_VOLUME	; Boost carrier only	; Boost if volume register
 	LD	A,E			; Get (possibly boosted) data
 	INC	HL
 	OUT	(OPL3DATA1),A		; Write data
@@ -77,7 +77,7 @@ VGM_OPL31:
 	POP	BC
 	LD	E,(HL)
 	POP	AF
-;	CALL	VGM_BOOST_VOLUME	; DISABLED - causes noise
+	CALL	VGM_BOOST_VOLUME	; Boost carrier only
 	LD	A,E
 	INC	HL
 	OUT	(OPL3DATA1),A		; Write data
@@ -97,7 +97,7 @@ VGM_OPL32:
 	POP	BC
 	LD	E,(HL)
 	POP	AF
-;	CALL	VGM_BOOST_VOLUME	; DISABLED - causes noise
+	CALL	VGM_BOOST_VOLUME	; Boost carrier only
 	LD	A,E
 	INC	HL
 	OUT	(OPL3DATA2),A		; Write data
@@ -219,20 +219,32 @@ VGM_DELAY_LOOP:
 ; Uses: HL (preserved via stack)
 ;===============================================================================
 VGM_BOOST_VOLUME:
-	CP	40H
-	RET	C			; < 0x40, not volume
-	CP	56H
-	RET	NC			; >= 0x56, not volume
-	; Volume register - reduce attenuation (bits 0-5)
+	; Only boost carrier operators: 0x43,0x44,0x45,0x4B,0x4C,0x4D,0x53,0x54,0x55
+	CP	43H
+	JR	Z,VGM_DO_BOOST
+	CP	44H
+	JR	Z,VGM_DO_BOOST
+	CP	45H
+	JR	Z,VGM_DO_BOOST
+	CP	4BH
+	JR	Z,VGM_DO_BOOST
+	CP	4CH
+	JR	Z,VGM_DO_BOOST
+	CP	4DH
+	JR	Z,VGM_DO_BOOST
+	CP	53H
+	JR	Z,VGM_DO_BOOST
+	CP	54H
+	JR	Z,VGM_DO_BOOST
+	CP	55H
+	JR	Z,VGM_DO_BOOST
+	RET				; Not a carrier, don't modify
+VGM_DO_BOOST:
+	; Boost carrier operator output
 	PUSH	HL
 	LD	A,E			; Get data
-	AND	3FH			; Mask attenuation (0-63)
-	SRL	A			; Divide by 2
-	SRL	A			; Divide by 4 (4x louder)
-	LD	L,A			; Save scaled
-	LD	A,E
-	AND	0C0H			; Keep upper bits
-	OR	L			; Combine
+	AND	0C0H			; Keep only upper bits (KSL)
+	; Attenuation bits (0-5) = 0 = max volume
 	LD	E,A			; Store back
 	POP	HL
 	RET
