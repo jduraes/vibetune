@@ -1,5 +1,5 @@
 ;===============================================================================
-; TUNE - Play PT2/PT3/MYM sound files
+; TUNE - Play PT2/PT3/MYM/VGM sound files
 ;
 ;===============================================================================
 ;
@@ -8,6 +8,13 @@
 ;	This application is basically just a RomWBW wrapper for the
 ;       Universal PT2 and PT3 player by S.V.Bulba and the MYM player
 ;       by Marq/Lieves!Tuore.  See comments below.
+;
+;	(Wayne, feel free to remove, move, alter)
+;	Additions by Joao Miguel Duraes, November 2025:
+;
+;	- Added VGM playback features/functions from vgmplay.com, including additions for OPL playback by Ed Brindley
+; 	- More comprehensive timings experiments, benefiting faster processors 
+;	- Better volume handling of OPL registers
 ;_______________________________________________________________________________
 ;
 ; Usage:
@@ -68,7 +75,7 @@
 #include	"src/system/hbios.inc"
 #include	"src/system/cpm.inc"
 #include	"src/tune.inc"
-#include "src/io/filetypes.inc"
+#include 	"src/io/filetypes.inc"
 ;
 ; HEAPEND constant now defined in src/io/filetypes.inc
 ;

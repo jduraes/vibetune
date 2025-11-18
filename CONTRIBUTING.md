@@ -7,7 +7,7 @@ VibeTune is a Z80 assembly project targeting RomWBW systems. Here's how to get s
 ### Prerequisites
 - macOS (current setup)
 - RomWBW development environment at `../RomWBW/`
-- z88dk installed at `/Users/mduraes/z88dk/`
+- z88dk installed at `~/z88dk/`
 - MAME with FATDISK mounted at `/Volumes/FATDISK` (for testing)
 
 ### Development Workflow

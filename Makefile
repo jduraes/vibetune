@@ -1,8 +1,12 @@
 OBJECTS = vibetune.com
 DEST = ../RomWBW/Binary/Apps
 TOOLS = ../RomWBW/Tools
-Z88DK_TICKS = /Users/mduraes/z88dk/bin/z88dk-ticks
-MAME_DISK = /Volumes/FATDISK
+
+# Z88DK_TICKS - Optional emulator for testing (override with: make test Z88DK_TICKS=/your/path)
+Z88DK_TICKS ?= z88dk-ticks
+
+# MAME_DISK - Optional disk path for MAME deployment (override with: make deploy MAME_DISK=/your/path)
+MAME_DISK ?= /Volumes/FATDISK
 
 include $(TOOLS)/Makefile.inc
 
@@ -114,5 +118,5 @@ clean::
 all::
 	mkdir -p $(DEST)/Tunes
 	cp Tunes/* $(DEST)/Tunes
-	mkdir -p $(DEST)/music
-	cp music/* $(DEST)/music
+	# Sample music files now in Tunes/ directory
+	

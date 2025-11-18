@@ -132,7 +132,7 @@ VibeTune is intended to be an enhanced version of RomWBW's tune.com with the fol
 
 ### Key Dependencies
 - RomWBW tools at `../RomWBW/Tools/`
-- z88dk at `/Users/mduraes/z88dk/bin/`
+- z88dk at `~/z88dk/bin/`
 - MAME FATDISK mounted at `/Volumes/FATDISK`
 
 ### File Structure

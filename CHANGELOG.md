@@ -25,7 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Build system adapted for standalone repository
 
 ### Technical Details
-- Source forked from `/Users/mduraes/Documents/development/RomWBW/Source/Apps/Tune`
+- Source forked from `RomWBW/Source/Apps/Tune`
 - Maintains full compatibility with original Tune.com functionality
 - Uses z88dk-compatible build system
 - Successfully tested with z88dk-ticks emulator
