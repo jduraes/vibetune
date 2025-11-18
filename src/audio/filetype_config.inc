@@ -191,7 +191,28 @@ VGM_CHECK_AY:
 	LD	A,H
 	OR	L
 	JR	Z,VGM_CHECK_PSG
-	LD	DE,MSGVGMAY
+	; Quick scan for dual chip (check first 64 bytes)
+	LD	HL,(vgmdata + 34H)	; Get VGM data start offset
+	LD	DE,vgmdata + 34H
+	ADD	HL,DE			; Calculate absolute start
+	LD	B,64			; Scan only 64 bytes
+VGM_AY_SCAN:
+	LD	A,(HL)			; Get command
+	CP	66H			; End of stream?
+	JR	Z,VGM_AY_SINGLE		; Stop scan
+	CP	0A0H			; AY write?
+	JR	NZ,VGM_AY_NEXT
+	INC	HL			; Point to register
+	LD	A,(HL)			; Get register number
+	BIT	7,A			; Chip 2 = bit 7 set
+	LD	DE,MSGVGMAY2		; Dual chip message
+	JR	NZ,VGM_CHIP_FOUND	; Found chip 2!
+	DEC	HL			; Back up
+VGM_AY_NEXT:
+	INC	HL
+	DJNZ	VGM_AY_SCAN
+VGM_AY_SINGLE:
+	LD	DE,MSGVGMAY		; Single chip
 	JR	VGM_CHIP_FOUND
 VGM_CHECK_PSG:
 	LD	HL,(vgmdata + 0CH)	; SN76489
