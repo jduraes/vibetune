@@ -138,11 +138,18 @@ VGM_AY:
 	JP	VGM_NEXT
 
 VGM_AY1:
-	OUT	(RSEL),A		; Select register on chip 1
-	LD	A,(HL)			; Get data
+	LD	C,A		; Save register number
+	PUSH	HL		; Save data pointer
+	LD	DE,(PORTS)	; E=RSEL, D=RDAT  
+	LD	A,C		; Restore register
+	LD	C,E		; C = RSEL port
+	OUT	(C),A		; Select register
+	POP	HL		; Restore data pointer
+	LD	A,(HL)		; Get data
 	INC	HL
-	OUT	(RDAT),A		; Write data to chip 1
-	LD	(vgmpos),HL		; Save position after data byte
+	LD	(vgmpos),HL	; Save position
+	LD	C,D		; C = RDAT port
+	OUT	(C),A		; Write data
 	JP	VGM_NEXT
 
 VGM_WAITNN:
