@@ -136,6 +136,78 @@ CONFIG_MYM_EXIT:
 ; VGM playback configuration - placeholder implementation
 CONFIG_VGM:
 	CALL	CRLF2			; Formatting
+
+	; Display VGM information - adplay style
+	LD	DE,MSGVGMPLAY		; "Playing '"
+	CALL	PRTSTR
+	LD	DE,FCB+1		; Print filename
+	LD	B,8
+VGM_FNAME:
+	LD	A,(DE)
+	CP	' '
+	JR	Z,VGM_FEXT
+	CALL	PRTCHR
+	INC	DE
+	DJNZ	VGM_FNAME
+VGM_FEXT:
+	LD	A,'.'
+	CALL	PRTCHR
+	LD	DE,FCB+9
+	LD	B,3
+VGM_FEXT2:
+	LD	A,(DE)
+	CP	' '
+	JR	Z,VGM_FNAME_DONE
+	CALL	PRTCHR
+	INC	DE
+	DJNZ	VGM_FEXT2
+VGM_FNAME_DONE:
+	LD	A,0x27			; Single quote
+	CALL	PRTCHR
+	LD	DE,MSGVGMDOT3		; "..."
+	CALL	PRTSTR
+	CALL	CRLF
+	
+	; Print "Type : VGM (chip)"
+	LD	DE,MSGVGMTYPE		; "Type  : VGM ("
+	CALL	PRTSTR
+	
+	; Detect chip - check most common first
+	LD	HL,(vgmdata + 50H)	; YM3812 (OPL2)
+	LD	A,H
+	OR	L
+	JR	Z,VGM_CHECK_OPL3
+	LD	DE,MSGVGMOPL2
+	JR	VGM_CHIP_FOUND
+VGM_CHECK_OPL3:
+	LD	HL,(vgmdata + 5CH)	; YMF262 (OPL3)
+	LD	A,H
+	OR	L
+	JR	Z,VGM_CHECK_AY
+	LD	DE,MSGVGMOPL3
+	JR	VGM_CHIP_FOUND
+VGM_CHECK_AY:
+	LD	HL,(vgmdata + 74H)	; AY-3-8910 (v1.61+)
+	LD	A,H
+	OR	L
+	JR	Z,VGM_CHECK_PSG
+	LD	DE,MSGVGMAY
+	JR	VGM_CHIP_FOUND
+VGM_CHECK_PSG:
+	LD	HL,(vgmdata + 0CH)	; SN76489
+	LD	A,H
+	OR	L
+	JR	Z,VGM_UNKNOWN
+	LD	DE,MSGVGMPSG
+	JR	VGM_CHIP_FOUND
+VGM_UNKNOWN:
+	LD	DE,MSGVGMUNK
+VGM_CHIP_FOUND:
+	CALL	PRTSTR
+	LD	A,')'			; Close paren
+	CALL	PRTCHR
+	CALL	CRLF2
+	
 	LD	DE,MSGPLY		; Playing message
 	CALL	PRTSTR			; Print message
 	
