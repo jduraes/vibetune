@@ -19,21 +19,14 @@ All notable changes to VibeTune will be documented in this file.
 - **Configurable dual AY chip support** for VGM playback
   - Added RSEL2/RDAT2 to config table structure (now 11 bytes per entry)
   - Secondary AY chip ports now configurable via PORTS2 variables
+  - VGM chip 2 writes now use `LD DE,(PORTS2)` for dynamic port addressing
+  - Infrastructure for dual AY card configurations (e.g., 0xA0/0xA1 + 0xA8/0xA9)
   - All config entries default to $FF (no chip 2) for backward compatibility
 
 ### Fixed
 - **VGM_MUTE_ALL** now uses proper port indirection for AY chips
   - AY mute correctly silences both chips when exiting playback
   - No more hanging notes when aborting AY VGM files
-
-## [0.2.7.1] - 2025-11-18
-
-### Added
-- Configurable secondary AY chip ports via PORTS2 (RSEL2/RDAT2)
-- Infrastructure for dual AY card configurations (e.g., 0xA0/0xA1 + 0xA8/0xA9)
-
-### Changed
-- VGM chip 2 writes now use `LD DE,(PORTS2)` for dynamic port addressing
 
 ## [0.2.7.0] - 2025-11-18
 
