@@ -2,123 +2,153 @@
 
 All notable changes to VibeTune will be documented in this file.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-
-## [0.1.0] - 2025-10-05
+## [0.2.7.3] - 2025-11-18
 
 ### Added
-- Initial VibeTune release based on RomWBW Tune v3.13 (28-May-2025)
-- Rebranded application banner and messages
-- New versioning system (semantic versioning)
-- Enhanced project structure with git repository
-- Comprehensive README.md with feature roadmap
-- Support for PT2, PT3, and MYM music file formats
-- Hardware auto-detection for various sound chips (AY-3-8910, YM2149, etc.)
-- Multi-platform support for RomWBW-compatible systems
-- Command-line options for port forcing, timing modes, and octave adjustment
+- **Dual AY chip detection** in VGM display
+  - Shows "2x AY-3-8910" for files using dual chips
+  - Scans first 64 bytes of command stream with early exit optimization
+  - Detects chip 2 by finding 0xA0 commands with register bit 7 set
 
 ### Changed
-- Application name from "Tune Player" to "VibeTune"
-- Banner message to reflect version and heritage
-- Usage message to show "VIBETUNE" command
-- Build system adapted for standalone repository
+- Optimized chip detection for minimal startup delay
 
-### Technical Details
-- Source forked from `RomWBW/Source/Apps/Tune`
-- Maintains full compatibility with original Tune.com functionality
-- Uses z88dk-compatible build system
-- Successfully tested with z88dk-ticks emulator
+## [0.2.7.2] - 2025-11-18
 
-## [0.2.0] - 2025-10-05
-
-### Added 
-- Modular file type identification system
-- File type detection module (`src/io/filetype_detection.inc`)
-- File type configuration module (`src/audio/filetype_config.inc`) 
-- Clear extension points for adding new file formats (VGM, D00, etc.)
-- Improved code organization and maintainability
-- Dynamic build date in banner message (DD-MMM-YYYY format)
-- Automatic build date injection during compilation
-- Enhanced build system with emulator testing
-- MAME deployment automation
-- Comprehensive make targets (test, deploy, release, help, clean)
-
-### Changed
-- Restructured file type handling for better modularity
-- Reduced main program complexity through modularization
-- Fixed include order dependency issues
+### Added
+- **Configurable dual AY chip support** for VGM playback
+  - Added RSEL2/RDAT2 to config table structure (now 11 bytes per entry)
+  - Secondary AY chip ports now configurable via PORTS2 variables
+  - All config entries default to $FF (no chip 2) for backward compatibility
 
 ### Fixed
-- Console I/O functionality after modularization
-- Proper function definition ordering
+- **VGM_MUTE_ALL** now uses proper port indirection for AY chips
+  - AY mute correctly silences both chips when exiting playback
+  - No more hanging notes when aborting AY VGM files
+
+## [0.2.7.1] - 2025-11-18
+
+### Added
+- Configurable secondary AY chip ports via PORTS2 (RSEL2/RDAT2)
+- Infrastructure for dual AY card configurations (e.g., 0xA0/0xA1 + 0xA8/0xA9)
+
+### Changed
+- VGM chip 2 writes now use `LD DE,(PORTS2)` for dynamic port addressing
+
+## [0.2.7.0] - 2025-11-18
+
+### Added
+- **VGM AY-3-8910 playback fully working!**
+  - Fixed AY port writes to use proper indirection via `LD DE,(PORTS)`
+  - AY register writes now go to actual chip ports (0xA0/0xA1) not RAM addresses
+  - Tiger.vgm and penguin.vgm play correctly with looping support
+  - OPL2/OPL3 playback continues working with volume boost and timing
+
+### Fixed
+- Critical AY port addressing bug - was writing to RAM address 0x22 instead of chip port 0xA0
+- Now uses PT3-style port loading: `LD DE,(PORTS)` then `OUT (C),A`
+
+## [0.2.6.48] - 2025-11-18
+
+### Added
+- **VGM info display** with adplay-style formatting
+  - Shows "Playing 'filename'..." with actual VGM filename
+  - Shows "Type : VGM (chip)" with detected chip type
+  - Supports OPL2, OPL3, AY-3-8910, SN76489 detection
+
+### Fixed
+- Chip detection order (OPL2 → OPL3 → AY → PSG) prevents misidentification
+
+## [0.2.6.47] - 2025-11-17
+
+### Added
+- **VGM OPL volume boost** - carrier operators only, zero attenuation
+  - Targets registers 0x43,0x44,0x45,0x4B,0x4C,0x4D,0x53,0x54,0x55
+  - Maximum volume with no distortion
+
+### Changed
+- VGM playback feature complete with perfect volume and timing
+
+## [0.2.6.46] - 2025-11-17
+
+### Added
+- VGM volume boost with carrier-only targeting
+
+## [0.2.6.45] - 2025-11-17
+
+### Added
+- **VGM timing perfected** for 18.432 MHz CPU
+  - Dynamic frame delay: `(CPU_KHz / 8) * 1.125 * 4`
+  - Playback timing matches vgmplay reference
+
+## [0.2.6.44] - 2025-11-17
+
+### Added
+- VGM playback working (low volume, needs boost)
+
+## [0.2.6.41-43] - 2025-11-17
+
+### Added
+- VGM OPL playback implementation with timing adjustments
+
+## [0.2.6.35] - 2025-11-15
+
+### Added
+- **D00 detection complete** - Hardware verified on RC2014
+
+## [0.2.6.34] - 2025-11-15
+
+### Added
+- **VGM detection complete** - Hardware verified on RC2014
+
+## [0.2.6.8] - 2025-10-07
+
+### Added
+- MAME verified build
+- Binary size: 5,160 bytes
 
 ## [0.2.6] - 2025-10-07
 
 ### Added
-- **SUCCESS**: Complete Include File Modularization
-  - Organized all `.inc` files from root directory into logical modular structure
-  - Created new directories: `src/system/`, `src/utils/`, `src/cli/`
-  - Moved 7 include files to appropriate locations with updated paths
-  - Incremental testing approach prevented regressions
+- **Complete Include File Modularization**
+  - Organized all `.inc` files into logical structure
+  - Created `src/system/`, `src/utils/`, `src/cli/` directories
   - Clean root directory with proper modular organization
-
-### Changed
-- **Include Structure**: All includes now use modular paths
-  - `src/system/`: `hbios.inc`, `cpm.inc` (system interface files)
-  - `src/utils/`: `printing.inc`, `strings.inc`, `timing.inc` (utility functions)
-  - `src/cli/`: `cli.inc` (command-line processing)
-  - `src/tune.inc`: Application-specific macros
-  - `src/ui/messages.inc`: UI messages (already modularized)
-
-### Technical
-- Version updated to 0.2.6 with build date 07-Oct-2025
-- Binary size maintained at 5,028 bytes (no functionality changes)
-- All tests pass, full compatibility preserved
-- Incremental approach: Test after each file move (successful pattern)
 
 ## [0.2.5] - 2025-10-06
 
+### Added
+- UI messages modularization (`src/ui/messages.inc`)
+
 ### Attempted
-- **FAILED**: Audio engine modularization (PTx and MYM players)
-  - Attempted to extract PTx Player Engine (~1,626 lines) and MYM Player Engine (~326 lines) into separate modules
-  - Successfully reduced main file from 2,749 lines to ~701 lines (74% reduction)
-  - Build completed successfully with no warnings or errors
-  - **Critical failure**: Program crashes with "BAD INT" errors during audio playback
-  - Root cause: Broken function references and memory layout dependencies after code extraction
-  - The audio players contain essential functions with specific entry points that other parts depend on
-  - Cross-module function calls not properly resolved, causing infinite loop at address @054B
+- Audio engine modularization (failed - broke function references)
+
+## [0.2.0] - 2025-10-05
 
 ### Added
-- **SUCCESS**: UI messages modularization
-  - Properly integrated `src/ui/messages.inc` into main build
-  - Removed duplicate messages from main file (22 lines eliminated)
-  - Clean separation of UI strings from core application logic
-  - All application messages now centralized in modular file
+- Modular file type identification system
+- File type detection and configuration modules
+- Dynamic build date in banner
+- Enhanced build system with MAME deployment
 
-### Fixed
-- Reverted to working monolithic version (vibetune_original.asm) after audio engine modularization failure
-- Implemented safer UI modularization approach
-- Maintained all functionality and compatibility
-- Updated version number to reflect the attempts and lessons learned
+## [0.1.0] - 2025-10-05
 
-### Lessons Learned
-- Audio engine modularization requires deeper analysis of:
-  - Function call dependencies and entry points
-  - Memory layout and address dependencies  
-  - Cross-module reference resolution
-  - Assembler limitations for complex modularization
-- Future modularization attempts need systematic approach to preserve function interfaces
+### Added
+- Initial VibeTune release based on RomWBW Tune v3.13
+- Support for PT2, PT3, and MYM formats
+- Hardware auto-detection for AY-3-8910, YM2149
+- Multi-platform support for RomWBW systems
 
-## [Unreleased]
+### Changed
+- Rebranded from "Tune Player" to "VibeTune"
+
+## Future Plans
+
+### In Progress
+- SN76489 (PSG) playback testing
 
 ### Planned
-- Additional sound file format support (VGM, D00, etc.)
-- Enhanced user interface and playback controls
-- Multi-sound card management improvements
-- Real-time audio controls (volume, tempo, channel muting)
-- Playlist and looping functionality
-- **Deferred**: Audio engine modularization (requires more careful architectural analysis)
-- v0.2.6.8 (2025-10-07) - MAME verified build
-- v0.2.6.34 (2025-11-15) - VGM detection complete - Hardware verified on RC2014
-- v0.2.6.35 (2025-11-15) - D00 detection complete - Hardware verified on RC2014
+- Enhanced multi-chip support
+- Real-time audio controls
+- Playlist functionality
+- Additional VGM chip types (YM2612, YM2151)
