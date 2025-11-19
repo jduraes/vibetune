@@ -285,15 +285,6 @@ EXIT	;
 	CALL	CRLF			; Formatting
 	JP	0			; Exit the easy way
 
-; VGM-specific hardware ports (fixed addresses for multi-chip/OPL3 support)
-PORTS2:
-RSEL2		.DB	0	; Secondary AY-3-8910 register select
-PSG2REG		.EQU	0FBH	; Secondary SN76489 data port
-OPL3ADDR1	.EQU	090H	; OPL3 bank 1 register select
-OPL3DATA1	.EQU	091H	; OPL3 bank 1 data
-OPL3ADDR2	.EQU	092H	; OPL3 bank 2 register select
-OPL3DATA2	.EQU	093H	; OPL3 bank 2 data
-
 #include "src/utils/timing.inc"
 #include "src/utils/strings.inc"
 #include "src/cli/cli.inc"
@@ -607,13 +598,13 @@ USEPORTS	.DB	0	; AUDIO CHIP PORT SELECTION MODE
 ;
 ; VGM-specific hardware ports (fixed addresses for multi-chip/OPL3 support)
 ; Note: Primary AY chip uses dynamic RSEL/RDAT from CFG structure
-PORTS2:
-RSEL2		.DB	0	; Secondary AY-3-8910 register select
+; Note: Secondary AY ports (PORTS2/RSEL2/RDAT2) are in CFG structure above
 OPL3ADDR1	.EQU	090H	; OPL3 bank 1 register select
 OPL3DATA1	.EQU	091H	; OPL3 bank 1 data
 OPL3ADDR2	.EQU	092H	; OPL3 bank 2 register select
 OPL3DATA2	.EQU	093H	; OPL3 bank 2 data
-;
+PSGREG		.EQU	07CH	; SN76489 PSG register (primary chip)
+PSG2REG		.EQU	07DH	; SN76489 PSG register (secondary chip)
 ; Hardware description strings
 HWSTR_SCG	.DB	"SCG ECB Board",0
 HWSTR_N8	.DB	"N8 Onboard Sound",0
