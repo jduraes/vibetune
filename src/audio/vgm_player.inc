@@ -216,11 +216,12 @@ VGM_APPLY_DELAY:
 VGM_DELAY_LOOP:
 	LD	A,(vgmfdly)
 	LD	B,A			; CPU cycle calibration
-	DJNZ	$			; Tight delay loop
+	DJNZ	$			; Tight delay loop (13 cycles)
 	DEC	HL			; Decrement delay counter
 	LD	A,H
 	OR	L
 	JR	NZ,VGM_DELAY_LOOP	; Loop until delay complete
+	RET
 	RET
 
 

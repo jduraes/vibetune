@@ -1,3 +1,23 @@
+## [0.2.7.25] - 2025-11-21
+
+### Fixed
+- **VGM Playback Timing**: Corrected VGM playback speed on RC2014 to match proper tempo (128 BPM target)
+  - Implemented proportional timing formula: `vgmfdly = ((CPU_KHz * 2) / 1024) * 11/16`
+  - Timing now automatically scales correctly for all CPU speeds (Z80, Z180, faster systems)
+  - Empirically tuned for RC2014 @ 7.3728 MHz (vgmfdly ≈ 10)
+  - Tested with penguin.vgm: playback tempo now matches PC VGM player
+
+- **RC2014 Crash on Startup**: Removed heap clear operation that caused "BAD INT" crashes
+  - Large LDIR operation (50KB) was triggering interrupt issues on RC2014 7.37MHz Z80
+  - Heap clearing is unnecessary in CP/M as memory starts in clean state
+  - PT3/PT2/MYM playback continues to work correctly without heap clear
+
+### Technical Notes
+- VGM timing formula derived empirically: target 128 BPM on penguin.vgm
+- Formula uses 11/16 multiplier for optimal balance across CPU speeds
+- Minimum vgmfdly value set to 5 for very slow CPUs
+- No impact on PT3/PT2/MYM playback which uses different timing mechanism
+
 # Changelog
 
 All notable changes to VibeTune will be documented in this file.

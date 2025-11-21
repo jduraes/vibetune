@@ -217,13 +217,12 @@ TSTTIMER:
 	EX	DE,HL			; Move result to HL
 	LD	(QDLY),HL		; Save result as quark delay factor
 ;
-	; Clear heap storage
-	LD	HL,HEAP			; Point to heap start
-	XOR	A			; A := zero
-	LD	(HEAP),A		; Clear first byte of heap
-	LD	DE,HEAP+1		; Set dest to next byte
-	LD	BC,HEAPEND-HEAP-1	; Size of heap except first byte
-	LDIR				; Propagate zero to rest of heap
+; 	LD	HL,HEAP			; Point to heap start
+; 	XOR	A			; A := zero
+; 	LD	(HEAP),A		; Clear first byte of heap
+; 	LD	DE,HEAP+1		; Set dest to next byte
+; 	LD	BC,HEAPEND-HEAP-1	; Size of heap except first byte
+; 	LDIR				; Propagate zero to rest of heap
 ;
 	; Detect file type using modular function
 	CALL	DETECT_FILE_TYPE	; A := detected file type

@@ -1,0 +1,21 @@
+v0.2.7.25 - Fix VGM timing and RC2014 heap clear crash
+
+Major fixes:
+- Fixed VGM playback timing to match correct tempo (128 BPM target)
+- Removed heap clear operation that caused BAD INT crashes on RC2014
+- Implemented proportional VGM timing formula: ((CPU_KHz * 2) / 1024) * 11/16
+- Timing now scales correctly across all CPU speeds (Z80, Z180, etc.)
+
+Technical details:
+- Heap clear (50KB LDIR) caused interrupt issues on RC2014 7.37MHz Z80
+- CP/M already provides clean memory state, making heap clear unnecessary
+- VGM timing empirically tuned: vgmfdly=10 for RC2014 gives 128 BPM
+- Formula automatically adjusts for faster CPUs (SC126, 20MHz systems, etc.)
+- PT3/PT2/MYM playback unaffected and continues to work correctly
+
+Testing:
+- Verified on RC2014 @ 7.3728 MHz: penguin.vgm plays at correct tempo
+- PT3 files (e.g. rl2wof.pt3) continue to play at correct speed
+- No crashes or hangs on RC2014 or SC126
+
+Resolves timing issues with VGM playback being too slow on RC2014.

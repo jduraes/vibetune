@@ -233,29 +233,37 @@ VGM_CHIP_FOUND:
 	CALL	PRTSTR			; Print message
 	
 	; Calculate dynamic frame delay based on CPU speed
+	; Formula: vgmfdly = ((CPU_KHz * 2) / 1024) * 11 / 16
+	; This scales correctly for all CPU speeds (tuned for 128 BPM)
 	LD	HL,(QDLY)		; CPU_KHz/2
-	ADD	HL,HL			; Restore full CPU speed in KHz
-	SRL	H			; Divide by 2
-	RR	L
-	SRL	H			; Divide by 4
-	RR	L
-	SRL	H			; Divide by 8 (~CPU_MHz * 2)
-	RR	L
-	LD	A,L			; Get result
+	ADD	HL,HL			; CPU_KHz
+	ADD	HL,HL			; CPU_KHz * 2
+	; Divide by 1024 = shift right 10 bits
+	LD	A,H			; Get high byte (divides by 256)
+	SRL	A			; Divide by 2 (now /512)
+	SRL	A			; Divide by 2 (now /1024)
+	; Now multiply by 11/16
+	; A = A * 11 / 16
 	LD	B,A			; Save original
-	SRL	A			; Divide by 2
-	SRL	A			; Divide by 4
-	SRL	A			; Divide by 8 (12.5%)
-	ADD	A,B			; Add back = 112.5%
-	CP	10			; Check minimum
+	ADD	A,A			; A = A * 2
+	ADD	A,B			; A = A * 3
+	LD	C,A			; C = A * 3
+	ADD	A,A			; A = A * 6
+	ADD	A,A			; A = A * 12
+	SUB	B			; A = A * 12 - A = A * 11
+	; Divide by 16 (shift right 4)
+	SRL	A			; /2
+	SRL	A			; /4
+	SRL	A			; /8
+	SRL	A			; /16
+	; Set minimum value
+	CP	5			; Minimum for very slow CPUs
 	JR	NC,VGM_FDLY_OK
-	LD	A,10			; Use minimum
+	LD	A,5
 VGM_FDLY_OK:
-	; Multiply by 4 for proper timing
-	ADD	A,A			; x2
-	ADD	A,A			; x4
 	LD	(vgmfdly),A		; Save frame delay
-	; Initialize VGM playback
+	LD	(vgmfdly),A		; Save frame delay
+	LD	(vgmfdly),A		; Save frame delay
 	CALL	VGM_MUTE_ALL		; Reset hardware
 	LD	HL,(vgmdata + 34H)	; Get VGM data start offset from header
 	LD	A,H
