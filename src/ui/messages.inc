@@ -47,3 +47,10 @@ MSGVGMOPL2	.DB	"OPL2",0
 MSGVGMOPL3	.DB	"OPL3",0
 MSGVGMUNK	.DB	"Unknown",0
 
+
+; Debug messages for VGM timing
+MSGCPUTYPE	.DB	" CPU:", 0
+MSGZ80		.DB	"Z80", 0
+MSGZ180		.DB	"Z180", 0
+MSGZ280		.DB	"Z280", 0
+MSGVGMFDLY	.DB	" vgmfdly=", 0

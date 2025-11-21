@@ -242,7 +242,10 @@ VGM_CHIP_FOUND:
 	LD	A,H			; Get high byte (divides by 256)
 	SRL	A			; Divide by 2 (now /512)
 	SRL	A			; Divide by 2 (now /1024)
-	; Now multiply by 11/16
+	; Check if value would overflow in 11/16 calc
+	CP	20			; If >= 20, skip 11/16 to avoid overflow
+	JR	NC,VGM_FDLY_NOSCALE	; Use value as-is for fast CPUs
+	; Now multiply by 11/16 (for slower CPUs only)
 	; A = A * 11 / 16
 	LD	B,A			; Save original
 	ADD	A,A			; A = A * 2
@@ -256,13 +259,23 @@ VGM_CHIP_FOUND:
 	SRL	A			; /4
 	SRL	A			; /8
 	SRL	A			; /16
+	JR	VGM_FDLY_CHK		; Skip 9/8 multiplier for slow CPUs
+VGM_FDLY_NOSCALE:
+	; Fast CPU path - multiply by 7/6
+	LD	B,A			; Save original
+	SRL	A			; A/2
+	SRL	A			; A/4
+	SRL	A			; A/8
+	LD	C,A			; C = A/8
+	SRL	A			; A/16
+	ADD	A,C			; A = A/16 + A/8 = 3A/16 ≈ A/6
+	ADD	A,B			; A = A/6 + A ≈ 7A/6
+VGM_FDLY_CHK:
 	; Set minimum value
 	CP	5			; Minimum for very slow CPUs
 	JR	NC,VGM_FDLY_OK
 	LD	A,5
 VGM_FDLY_OK:
-	LD	(vgmfdly),A		; Save frame delay
-	LD	(vgmfdly),A		; Save frame delay
 	LD	(vgmfdly),A		; Save frame delay
 	CALL	VGM_MUTE_ALL		; Reset hardware
 	LD	HL,(vgmdata + 34H)	; Get VGM data start offset from header
