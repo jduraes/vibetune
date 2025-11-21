@@ -8,15 +8,17 @@ MSGBAN  .EQU    VERSION_STR         ; Use auto-generated version string
 MSGUSE		.DB	"Based on RomWBW Tune v3.13, 28-May-2025",13,10
 		.DB	"Copyright (C) 2025, Wayne Warthen, GNU GPL v3",13,10
 		.DB	"PTxPlayer Copyright (C) 2004-2007 S.V.Bulba",13,10
-		.DB	"MYMPlay by Marq/Lieves!Tuore",13,10,13,10
-		.DB	"Usage: VIBETUNE <filename>.[PT2|PT3|MYM|VGM|D00] [-msx|-rc] [-delay] [--hbios] [+tn|-tn]",0
+		.DB	"MYMPlay by Marq/Lieves!Tuore",13,10
+		.DB	"VGMPlay by J.B. Langston, Marco Maccaferri, Ed Brindley",13,10
+		.DB	"VGMPlay by J.B. Langston, Marco Maccaferri, Ed Brindley",13,10,13,10
+		.DB	"Usage: VIBETUNE <filename>.[PT2|PT3|MYM|VGM] [-msx|-rc] [-delay] [--hbios] [+tn|-tn]",0
 
 ; Error messages
 MSGBIO		.DB	"Incompatible BIOS or version, "
 		.DB	"HBIOS v", '0' + RMJ, ".", '0' + RMN, " required",0
 MSGPLT		.DB	"Hardware error, system not supported!",0
 MSGHW		.DB	"Hardware error, sound chip not detected!",0
-MSGNAM		.DB	"Sound filename invalid (must be .PT2, .PT3, .MYM, .VGM, or .D00)",0
+MSGNAM		.DB	"Sound filename invalid (must be .PT2, .PT3, .MYM, or .VGM)",0
 MSGFIL		.DB	"Sound file not found!",0
 MSGSIZ		.DB	"Sound file too large to load!",0
 MSGERR		.DB	"App Error", 0
