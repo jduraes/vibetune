@@ -33,7 +33,6 @@ MSGARTIST	.DB	"by:        ", 0
 
 ; Special messages
 MSGUNSUP	.db	"MYM files not supported with HBIOS yet!\r\n", 0
-MSGNOTVGM	.DB	"VGM playback not yet implemented - coming soon!",13,10,0
 MSGNOTD00	.DB	"D00 playback not yet implemented - coming soon!",13,10,0
 
 ; VGM display messages (adplay style)
@@ -47,8 +46,3 @@ MSGVGMOPL2	.DB	"OPL2",0
 MSGVGMOPL3	.DB	"OPL3",0
 MSGVGMUNK	.DB	"Unknown",0
 
-; Debug breadcrumbs
-MSGDBGA	.DB	"[A]",0
-MSGDBGB	.DB	"[B]",0
-MSGDBGC	.DB	"[C]",0
-MSGDBGD	.DB	"[D]",0
