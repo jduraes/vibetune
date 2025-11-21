@@ -6,10 +6,9 @@
 ; Main application messages - version string defined in build_meta.inc
 MSGBAN  .EQU    VERSION_STR         ; Use auto-generated version string
 MSGUSE		.DB	"Based on RomWBW Tune v3.13, 28-May-2025",13,10
-		.DB	"Copyright (C) 2025, Wayne Warthen, GNU GPL v3",13,10
+		.DB	"Copyright (C) 2025, Wayne Warthen, GNU GPL v3",13,10,13,10
 		.DB	"PTxPlayer Copyright (C) 2004-2007 S.V.Bulba",13,10
 		.DB	"MYMPlay by Marq/Lieves!Tuore",13,10
-		.DB	"VGMPlay by J.B. Langston, Marco Maccaferri, Ed Brindley",13,10
 		.DB	"VGMPlay by J.B. Langston, Marco Maccaferri, Ed Brindley",13,10,13,10
 		.DB	"Usage: VIBETUNE <filename>.[PT2|PT3|MYM|VGM] [-msx|-rc] [-delay] [--hbios] [+tn|-tn]",0
 
