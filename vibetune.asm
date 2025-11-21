@@ -147,7 +147,7 @@ CONTINUE:
 	JR	AUTOSEL			; otherwise do auto select
 
 FORCE:
-	LD	BC,9			; Size of forced port entry (1+6+2)
+	LD	BC,CFGSIZ		; Size of one entry
 	LD	DE,CFG			; Active config structure
 	LDIR				; Update active config structure
 	JR	MAT			; Print forced port description
@@ -556,11 +556,11 @@ CFGSIZ	.EQU	$ - CFGTBL
 ; detection searching.  They are selected byh command line options.
 ;
 MSXPORTS:
-	.DB	$FF,	$A0,	$A1,	$FF,	$FF,	$FF,	$FF	; GENERIC MSX
+	.DB	$FF,	$A0,	$A1,	$A2,	$FF,	$FF,	$FF,	$FF,	$FF	; GENERIC MSX
 	.DW	HWSTR_MSX
 ;
 RCPORTS:
-	.DB	$FF,	$D8,	$D0,	$FF,	$FF,	$FF,	$FF	; GENERIC RC
+	.DB	$FF,	$D8,	$D0,	$D8,	$FF,	$FF,	$FF,	$FF,	$FF	; GENERIC RC
 	.DW	HWSTR_RC
 ;
 CFG:		; ACTIVE CONFIG VALUES (FROM SELECTED CFGTBL ENTRY)
