@@ -150,7 +150,7 @@ FORCE:
 	LD	BC,CFGSIZ		; Size of one entry
 	LD	DE,CFG			; Active config structure
 	LDIR				; Update active config structure
-	JR	TSTTIMER		; Skip hardware probe when forcing ports
+	JR	MAT			; Print forced port description
 
 AUTOSEL:
 	LD	HL,CFGTBL		; Point to start of config table
