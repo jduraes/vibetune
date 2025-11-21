@@ -147,7 +147,7 @@ CONTINUE:
 	JR	AUTOSEL			; otherwise do auto select
 
 FORCE:
-	LD	BC,CFGSIZ		; Size of one entry
+	LD	BC,9			; Size of forced port entry (1+6+2)
 	LD	DE,CFG			; Active config structure
 	LDIR				; Update active config structure
 	JR	MAT			; Print forced port description
