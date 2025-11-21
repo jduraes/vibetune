@@ -1,8 +1,8 @@
-# VibeTune v0.2.6.27
+# VibeTune v0.2.8.0
 
 VibeTune is an enhanced music player for RomWBW, evolved from the original Tune.com application. This project aims to create a more advanced and feature-rich sound player that supports multiple sound file formats and multiple sound cards.
 
-**Current Version**: v0.2.6.27 - Based on RomWBW Tune v3.13 (28-May-2025)
+**Current Version**: v0.2.8.0 - Based on RomWBW Tune v3.13 (28-May-2025)
 
 ## Version Numbering
 
@@ -14,11 +14,13 @@ VibeTune follows semantic versioning (major.minor.patch):
 ## Features
 
 ### Core Functionality
-- **Sound File Formats**: PT2, PT3, and MYM files
-- **Sound Chips**: AY-3-8910, YM2149, and compatible chips
+- **Sound File Formats**: PT2, PT3, MYM, and VGM files
+- **Sound Chips**: AY-3-8910, YM2149, OPL2/OPL3, SN76489, and compatible chips
 - **Multiple Platforms**: Supports various RomWBW-compatible systems
 - **Hardware Detection**: Automatic sound hardware detection and configuration
 - **Multiple Sound Modules**: Support for various sound expansion cards
+- **Adaptive Timing**: Automatic CPU speed detection and compensation (7-20+ MHz)
+- **Adaptive Timing**: Automatic CPU speed detection and compensation (7-20+ MHz)
 
 ### Architecture (v0.2.0+)
 - **Modular Design**: Clean separation of file type detection, audio configuration, and UI
@@ -29,12 +31,12 @@ VibeTune follows semantic versioning (major.minor.patch):
 ## Usage
 
 ```
-VIBETUNE <filename>.[PT2|PT3|MYM] [-msx|-rc] [-delay] [--hbios] [+tn|-tn]
+VIBETUNE <filename>.[PT2|PT3|MYM|VGM] [-msx|-rc] [-delay] [--hbios] [+tn|-tn]
 ```
 
 ### Parameters
 
-- `<filename>`: Sound file to play (PT2, PT3, or MYM format)
+- `<filename>`: Sound file to play (PT2, PT3, MYM, or VGM format)
 - `-msx`: Force MSX standard ports (A0H/A1H)
 - `-rc`: Force RCBus standard ports (D8H/D0H)
 - `-delay`: Force delay mode timing
@@ -67,11 +69,13 @@ make clean          # Remove build artifacts
 The build system automatically deploys VibeTune to your MAME FATDISK when you run `make deploy` or `make release`. Sample music files are also copied for testing:
 - `Attack.pt3` - PT3 format demo
 - `Demo.mym` - MYM format demo
+- `penguin.vgm` - VGM format demo
 
 In MAME (CP/M system), you can test with:
 ```
 VIBETUNE ATTACK.PT3
 VIBETUNE DEMO.MYM
+VIBETUNE PENGUIN.VGM
 ```
 
 ## Development Roadmap
@@ -86,12 +90,14 @@ Future enhancements planned for VibeTune:
 
 ## Technical Notes
 
-- **Binary size**: 4,890 bytes (optimized with modular architecture)
-- **Maximum CPU speed**: ~8MHz for proper sound chip operation (Z180 can run faster due to I/O wait states)
+- **Binary size**: 6,143 bytes (optimized with modular architecture)
+- **CPU Speed Support**: Adaptive timing for 7-20+ MHz systems (tested on RC2014 @ 7.37 MHz and SC126 @ 18.43 MHz)
 - **Optimal PSG clock**: ~1.77MHz (similar to MSX/ZX Spectrum standards)
 - **Memory requirement**: Loads files up to available heap space (typically ~48KB)
 - **Timer support**: Uses hardware timers when available, falls back to CPU delay loops
 - **Architecture**: Modular design with separated concerns for easy extension
+- **VGM Timing**: Automatically scales with CPU speed using adaptive multipliers (11/16 for slow CPUs, 7/6 for fast CPUs)
+- **VGM Timing**: Automatically scales with CPU speed using adaptive multipliers (11/16 for slow CPUs, 7/6 for fast CPUs)
 
 ## Origins
 
@@ -99,6 +105,7 @@ VibeTune is based on the original Tune.com from RomWBW, which incorporates:
 
 - **PTx Player**: Universal PT2/PT3 player by S.V.Bulba
 - **MYM Player**: MYM player by Marq/Lieves!Tuore
+- **VGM Player**: VGM player by J.B. Langston, Marco Maccaferri, Ed Brindley
 - **RomWBW Integration**: Hardware abstraction and platform support by Wayne Warthen
 
 ## License
