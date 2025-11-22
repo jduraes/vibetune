@@ -5,17 +5,15 @@
 VibeTune is a Z80 assembly project targeting RomWBW systems. Here's how to get started:
 
 ### Prerequisites
-- macOS (current setup)
+- macOS, Linux or Windows with WSL/Ubuntu
 - RomWBW development environment at `../RomWBW/`
 - z88dk installed at `~/z88dk/`
-- MAME with FATDISK mounted at `/Volumes/FATDISK` (for testing)
 
 ### Development Workflow
 
-1. **Build**: `make vibetune.com`
+1. **Build**: `make`
 2. **Test**: `make test` (runs z88dk-ticks emulator)
-3. **Deploy**: `make deploy` (copies to MAME disk)
-4. **All-in-one**: `make release`
+3. **Clean artifacts**: `make clean`
 
 ### Code Style
 
@@ -48,7 +46,7 @@ The modular architecture provides clear extension points for:
 
 ### Version Management
 
-- **Semantic versioning**: major.minor.patch
+- **Semantic versioning**: major.minor.patch.vibe
 - **Build dates**: Automatic injection in DD-MMM-YYYY format
 - **Git tags**: All releases tagged (e.g., v0.1.0)
 
@@ -71,7 +69,7 @@ The modular architecture provides clear extension points for:
 
 ### Immediate Contribution Opportunities
 
-1. **Additional audio formats** (VGM, D00, SID, MOD) - Use established extension points
+1. **Additional audio formats** (VGM, D00, SID) - Use established extension points
 2. **Enhanced hardware support** (OPL, FM synthesis) - Extend hardware constants
 3. **User interface improvements** (real-time controls, better info display)
 4. **Advanced features** (playlists, looping, volume control)
