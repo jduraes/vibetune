@@ -55,7 +55,6 @@ make vibetune.com    # Build the executable
 ### Testing & Deployment
 ```bash
 make test           # Run emulator test with z88dk-ticks
-make deploy         # Copy to MAME disk (/Volumes/FATDISK)
 make release        # Build + test + deploy in one command
 ```
 
