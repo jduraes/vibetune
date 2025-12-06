@@ -15,13 +15,6 @@ VibeTune is a Z80 assembly project targeting RomWBW systems. Here's how to get s
 2. **Test**: `make test` (runs z88dk-ticks emulator)
 3. **Clean artifacts**: `make clean`
 
-### Code Style
-
-VibeTune follows CP/M/DOS 8.3 filename conventions:
-- Use letters over symbols in filenames when possible
-- Lowercase letters are acceptable
-- Avoid forcing uppercase unless needed
-
 ### Current Architecture (v0.2.0)
 
 **Modular Structure**:
