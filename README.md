@@ -64,19 +64,6 @@ make help           # Show all available targets
 make clean          # Remove build artifacts
 ```
 
-### MAME Testing
-The build system automatically deploys VibeTune to your MAME FATDISK when you run `make deploy` or `make release`. Sample music files are also copied for testing:
-- `Attack.pt3` - PT3 format demo
-- `Demo.mym` - MYM format demo
-- `penguin.vgm` - VGM format demo
-
-In MAME (CP/M system), you can test with:
-```
-VIBETUNE ATTACK.PT3
-VIBETUNE DEMO.MYM
-VIBETUNE PENGUIN.VGM
-```
-
 ## Development Roadmap
 
 Future enhancements planned for VibeTune:
