@@ -35,6 +35,7 @@ The modular architecture provides clear extension points for:
 ### Testing Strategy
 
 **Current**: Basic emulator validation with z88dk-ticks
+
 **Planned**: Unit tests, integration tests, module validation
 
 ### Version Management
