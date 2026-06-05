@@ -1,0 +1,3114 @@
+;===============================================================================
+; VIBETUNE - clean-room bootstrap implementation
+;===============================================================================
+;
+; This first slice proves the independent workspace can build with RomWBW tools,
+; use relative include references, and emit the required banner format.
+;
+#include "../RomWBW/Source/ver.inc"
+#include "../RomWBW/Source/Apps/Tune/cpm.inc"
+#include "../RomWBW/Source/HBIOS/hbios.inc"
+#include "vtversion.inc"
+
+#DEFINE ERR_OK 0
+#DEFINE ERR_NO_ARG 1
+#DEFINE ERR_TOO_MANY_ARGS 2
+#DEFINE ERR_UNSUPPORTED_FORMAT 3
+#DEFINE ERR_INVALID_FILENAME 4
+#DEFINE ERR_FILE_NOT_FOUND 5
+#DEFINE ERR_FILE_READ 6
+#DEFINE ERR_INVALID_DATA 7
+#DEFINE ERR_ENGINE_INIT 8
+
+#DEFINE ENGINE_NONE 0
+#DEFINE ENGINE_PTX 1
+#DEFINE ENGINE_MYM 2
+
+#DEFINE PTX_VARIANT_UNKNOWN 0
+#DEFINE PTX_VARIANT_VORTEX 1
+#DEFINE PTX_VARIANT_PROTRACKER 2
+
+#DEFINE MAX_TRACKS 32
+#DEFINE TRACK_NAME_LEN 13
+
+; Display mode identifiers (DISP_MODE values)
+#DEFINE DISP_PLAIN 0
+#DEFINE DISP_VT100 1
+#DEFINE DISP_ANSI 2
+
+; Screen layout constants (rows, 1-based)
+#DEFINE DISP_ROWS 24
+#DEFINE DISP_COLS 80
+#DEFINE DISP_ROW_BANNER 1
+#DEFINE DISP_ROW_STATUS 2
+#DEFINE DISP_ROW_LEGEND 3
+#DEFINE DISP_ROW_TRACKS 5
+
+; Milestone 4: Playback state machine values
+#DEFINE PLAY_STOPPED 0
+#DEFINE PLAY_PLAYING 1
+#DEFINE PLAY_PAUSED  2
+
+; Milestone 9: Hardware detection and configuration
+; Config modes for CLI override flags
+#DEFINE HW_MODE_AUTO 0		; Auto-detect via HBIOS + probing
+#DEFINE HW_MODE_MSX 1		; Force MSX standard ($A0/$A1)
+#DEFINE HW_MODE_RC 2		; Force RC2014 standard ($D8/$D0)
+#DEFINE HW_MODE_EB 3		; Force EB module (platform-dependent)
+#DEFINE HW_MODE_COLECO 4	; Force Coleco ($50/$51)
+
+; Milestone 4: PSG hardware abstraction (AY-3-8910, RomWBW standard ports)
+; Register select = write register number to PSG_REG_PORT
+; Data I/O       = read/write value via PSG_DATA_PORT
+; NOTE: These are now set dynamically by hardware detection, not hardcoded.
+; Kept as fallback defaults if detection fails.
+#DEFINE PSG_REG_PORT_DEFAULT  $A0
+#DEFINE PSG_DATA_PORT_DEFAULT $A1
+; Milestone 8 prep: optional second chip ports for TurboSound-style routing.
+; Default remains single-chip AY until explicit runtime selection is added.
+#DEFINE PSG2_REG_PORT_DEFAULT  $A3
+#DEFINE PSG2_DATA_PORT_DEFAULT $A2
+#DEFINE AUDIO_OUT_AY 0
+#DEFINE AUDIO_OUT_TURBOSOUND 1
+
+; Tune module load area: heap from MDLADDR up to HEAPENDB page (set at startup).
+#DEFINE HEAPEND $C000
+
+; Milestone 6: Input and loop control
+#DEFINE LOOP_NONE    0		; no looping
+#DEFINE LOOP_TRACK   1		; loop current track indefinitely
+#DEFINE LOOP_PLAYLIST 2		; loop through all tracks and restart
+; Key bindings
+#DEFINE KEY_QUIT   'Q'
+#DEFINE KEY_QUIT_L 'q'
+#DEFINE KEY_QUIT_ESC $1B
+#DEFINE KEY_QUIT_CTRL_C $03
+#DEFINE KEY_PAUSE  ' '
+#DEFINE KEY_NEXT   'N'
+#DEFINE KEY_NEXT_L 'n'
+#DEFINE KEY_PREV   'P'
+#DEFINE KEY_PREV_L 'p'
+#DEFINE KEY_LOOP   'L'
+#DEFINE KEY_LOOP_L 'l'
+; Quark delay removed — use timing.inc WAITQ (CPU-calibrated ~20 ms/quark).
+
+; Startup run mode
+#DEFINE RUNMODE_PLAY 0
+#DEFINE RUNMODE_LIST 1
+
+	.ORG	$0100
+
+START:
+	CALL	HEAPENDB_INIT
+	XOR	A
+	LD	(RUN_MODE), A
+	LD	(PTX_VARIANT), A
+	LD	(MYM_FRAME_HINT), A
+	LD	(ENGINE_READY), A
+	LD	(AUDIO_OUT_MODE), A
+	LD	(HBIOS_SOUND_OK), A
+	LD	(PSG_HW_VALID), A
+	LD	(PLAY_STATE), A
+	LD	(PSG_TOUCHED), A
+	CALL	CRLF
+	LD	DE, MSG_BANNER
+	CALL	PRTSTR
+	CALL	CRLF
+	CALL	PARSE_AND_CLASSIFY
+	OR	A
+	JP	Z, START_AFTER_PARSE_OK
+	CP	ERR_NO_ARG
+	JP	Z, START_NO_ARG
+	CP	ERR_TOO_MANY_ARGS
+	JP	Z, START_TOO_MANY
+	CP	ERR_INVALID_FILENAME
+	JP	Z, START_INVALID_FILENAME
+	CP	ERR_FILE_NOT_FOUND
+	JP	Z, START_FILE_NOT_FOUND
+	LD	DE, MSG_ERR_UNSUPPORTED
+	CALL	PRTSTR
+	CALL	CRLF
+	JP	START_EXIT
+
+START_AFTER_PARSE_OK:
+	; Do not probe/query the AY for usage-only or parse errors (avoids pops).
+	CALL	DETECT_DISPLAY_MODE
+	CALL	DETECT_HARDWARE_CONFIG
+	CALL	BULBA_SYNC_PORTS
+	CALL	PRINT_HARDWARE_CONFIG
+	CALL	PROBETIMER
+	CALL	INIT_QDLY_BASE
+	CALL	PRINT_TIMING_MODE
+	CALL	CRLF
+	LD	A, (RUN_MODE)
+	CP	RUNMODE_LIST
+	JP	Z, START_SCAN
+	JP	START_VALIDATE_FILE
+
+START_VALIDATE_FILE:
+	CALL	VALIDATE_FILE_ACCESS
+	OR	A
+	JP	NZ, START_VALIDATE_FILE_ERR
+	CALL	VALIDATE_FORMAT_STRUCTURE
+	OR	A
+	JP	Z, START_VALIDATE_ENGINE
+	CP	ERR_INVALID_DATA
+	JP	Z, START_INVALID_DATA
+	JP	START_VALIDATE_FILE_ERR
+
+START_VALIDATE_ENGINE:
+	; Engine init runs after LOAD_MUSIC_FILE (MUSIC_BUF must be valid).
+	JP	START_OK
+
+START_VALIDATE_FILE_ERR:
+	CP	ERR_FILE_NOT_FOUND
+	JP	Z, START_FILE_NOT_FOUND
+	LD	DE, MSG_ERR_FILE_READ
+	CALL	PRTSTR
+	CALL	CRLF
+	JP	START_EXIT
+
+START_NO_ARG:
+	LD	DE, MSG_USAGE
+	CALL	PRTSTR
+	CALL	CRLF
+	JP	START_EXIT
+
+START_TOO_MANY:
+	LD	DE, MSG_ERR_TOO_MANY
+	CALL	PRTSTR
+	CALL	CRLF
+	LD	DE, MSG_USAGE
+	CALL	PRTSTR
+	CALL	CRLF
+	JP	START_EXIT
+
+START_INVALID_FILENAME:
+	LD	DE, MSG_ERR_INVALID_FILENAME
+	CALL	PRTSTR
+	CALL	CRLF
+	JP	START_EXIT
+
+START_FILE_NOT_FOUND:
+	LD	DE, MSG_ERR_FILE_NOT_FOUND
+	CALL	PRTSTR
+	CALL	CRLF
+	JP	START_EXIT
+
+START_INVALID_DATA:
+	LD	DE, MSG_ERR_INVALID_DATA
+	CALL	PRTSTR
+	CALL	CRLF
+	JP	START_EXIT
+
+START_ENGINE_INIT_ERR:
+	LD	DE, MSG_ERR_ENGINE_INIT
+	CALL	PRTSTR
+	CALL	CRLF
+	JP	START_EXIT
+
+START_LOAD_FAIL:
+	LD	DE, MSG_ERR_FILE_READ
+	CALL	PRTSTR
+	CALL	CRLF
+	JP	START_EXIT
+
+START_OK:
+	LD	DE, MSG_INPUT
+	CALL	PRTSTR
+	LD	DE, ARG_BUFFER
+	CALL	PRTSTR
+	CALL	CRLF
+	LD	A, (FILE_ENGINE)
+	CP	ENGINE_PTX
+	JR	NZ, START_SHOW_MYM
+	LD	DE, MSG_CLASS_PTX
+	CALL	PRTSTR
+	CALL	CRLF
+	JP	START_SHOW_ENGINE_READY
+
+START_SHOW_ENGINE_READY:
+	JP	START_LOAD_AND_PLAY
+
+START_SHOW_MYM:
+	LD	DE, MSG_CLASS_MYM
+	CALL	PRTSTR
+	CALL	CRLF
+	LD	DE, MSG_MYM_HINT_PREFIX
+	CALL	PRTSTR
+	LD	A, (MYM_FRAME_HINT)
+	CALL	PRINT_HEX_BYTE
+	CALL	CRLF
+	JP	START_LOAD_AND_PLAY
+
+START_LOAD_AND_PLAY:
+	; Explicit filename path: load and start playback directly.
+	; Directory scan/list mode is reserved for future dedicated list entry.
+	CALL	HEAP_CLEAR
+	CALL	LOAD_MUSIC_FILE
+	OR	A
+	JP	NZ, START_LOAD_FAIL
+	CALL	ENGINE_INIT
+	OR	A
+	JP	Z, START_LOAD_ENGINE_OK
+	CP	ERR_INVALID_DATA
+	JP	Z, START_INVALID_DATA
+	JP	START_ENGINE_INIT_ERR
+START_LOAD_ENGINE_OK:
+	LD	A, PLAY_PLAYING
+	LD	(PLAY_STATE), A
+	CALL	APPLY_ENGINE_QDLY_ADJ
+	LD	A, (FILE_ENGINE)
+	CP	ENGINE_PTX
+	JR	NZ, START_LOAD_SHOW_MODE
+	LD	A, (PTX_VARIANT)
+	CP	PTX_VARIANT_PROTRACKER
+	JR	Z, START_LOAD_SHOW_PT3
+	LD	DE, MSG_PTX_VARIANT_VORTEX
+	CALL	PRTSTR
+	CALL	CRLF
+	JR	START_LOAD_SHOW_MODE
+START_LOAD_SHOW_PT3:
+	LD	DE, MSG_PTX_VARIANT_PROTRACKER
+	CALL	PRTSTR
+	CALL	CRLF
+START_LOAD_SHOW_MODE:
+	LD	DE, MSG_ENGINE_INIT_OK
+	CALL	PRTSTR
+	CALL	CRLF
+	CALL	UPDATE_AUDIO_MODE_FROM_MUSIC
+	CALL	PRINT_AUDIO_MODE_STATUS
+	LD	A, (DEBUG_FLAG)
+	OR	A
+	JR	Z, START_LOAD_NO_DEBUG
+	LD	DE, MSG_DEBUG_ON
+	CALL	PRTSTR
+	CALL	CRLF
+START_LOAD_NO_DEBUG:
+	LD	DE, MSG_PLAYING
+	CALL	PRTSTR
+	CALL	CRLF
+	JP	MAIN_LOOP
+
+START_SCAN:
+	LD	DE, MSG_SCANNING
+	CALL	PRTSTR
+	CALL	CRLF
+	CALL	SCAN_TRACKS
+	LD	DE, MSG_TRACKS_FOUND
+	CALL	PRTSTR
+	LD	A, (TRACK_COUNT)
+	CALL	PRINT_DECIMAL_BYTE
+	CALL	CRLF
+	LD	A, (TRACK_COUNT)
+	OR	A
+	JP	Z, START_EXIT
+	CALL	PRINT_TRACK_LIST
+	; List mode is informational only: return to CCP after printing.
+	JP	START_EXIT
+
+START_EXIT:
+	; Restore CP/M default DMA (0080h) before returning to CCP/BDOS.
+	; Scan/load paths repoint DMA to program buffers; leaving it there can
+	; destabilize the shell after exit on some systems.
+	LD	DE, $0080
+	LD	C, $1A
+	CALL	BDOS
+	; Mute on exit only if playback touched the PSG (tune.com skips mute on usage error).
+	LD	A, (PSG_TOUCHED)
+	OR	A
+	JP	Z, START_EXIT_RET
+	XOR	A
+	LD	(PSG_TOUCHED), A
+	CALL	PSG_MUTE_DIRECT
+
+START_EXIT_RET:
+	RET
+
+; Milestone 1A: Load display config from VTUNE.CFG if present.
+; Config file format (binary, 3 bytes):
+;   byte 0: magic = 0xA5
+;   byte 1: DISP_MODE (0=plain, 1=VT100, 2=ANSI)
+;   byte 2: reserved (ignored)
+; Missing file or invalid magic → DISP_MODE stays DISP_PLAIN.
+; No VT100/ANSI probing is attempted at runtime; the config file is
+; the sole authority on display capability.
+; Output: DISP_MODE is valid and stable for all subsequent display calls.
+#DEFINE CFG_MAGIC $A5
+DETECT_DISPLAY_MODE:
+	; Build FCB for VTUNE.CFG in CFG_FCB
+	CALL	BUILD_CFG_FCB
+	; Set DMA to DMA_BUFFER (safe: structural validation not yet run)
+	LD	DE, DMA_BUFFER
+	LD	C, $1A
+	CALL	BDOS
+	; Open config file (BDOS 0Fh)
+	LD	DE, CFG_FCB
+	LD	C, $0F
+	CALL	BDOS
+	CP	$FF
+	JR	Z, DETECT_DISP_NO_CFG	; file not found — use default
+	; Read one 128-byte block (BDOS 14h)
+	LD	DE, CFG_FCB
+	LD	C, $14
+	CALL	BDOS
+	OR	A
+	JR	NZ, DETECT_DISP_CLOSE	; read error — use default
+	; Validate magic byte
+	LD	A, (DMA_BUFFER)
+	CP	CFG_MAGIC
+	JR	NZ, DETECT_DISP_CLOSE
+	; Load DISP_MODE from byte 1
+	LD	A, (DMA_BUFFER+1)
+	CP	DISP_ANSI + 1
+	JR	NC, DETECT_DISP_CLOSE	; out of range — use default
+	LD	(DISP_MODE), A
+DETECT_DISP_CLOSE:
+	; Close config file (BDOS 10h)
+	LD	DE, CFG_FCB
+	LD	C, $10
+	CALL	BDOS
+DETECT_DISP_NO_CFG:
+	; Final range clamp (ensures DISP_MODE is always valid)
+	LD	A, (DISP_MODE)
+	CP	DISP_ANSI + 1
+	JR	C, DETECT_DISP_DONE
+	XOR	A
+	LD	(DISP_MODE), A
+DETECT_DISP_DONE:
+	RET
+
+; From CP/M page 0: high byte of BDOS vector at 7; module load stops one page below.
+HEAPENDB_INIT:
+	LD	A, (7)
+	DEC	A
+	LD	(HEAPENDB), A
+	RET
+
+; Zero player state + module area before load (VARS..HEAPEND-1).
+; Starts at VARS, NOT HEAP: the parse buffers (FCB_WORK, ARG_BUFFER, ...) and
+; BULBA_PORTS sit below VARS and are populated before this runs — clearing the
+; whole heap would wipe the parsed filename FCB and the detected ports.
+HEAP_CLEAR:
+	LD	HL, VARS
+	XOR	A
+	LD	(HL), A
+	LD	DE, VARS + 1
+	LD	BC, HEAPEND - VARS - 1
+	LDIR
+	RET
+
+; Build a CP/M FCB in CFG_FCB for VTUNE.CFG (drive 0, current drive).
+BUILD_CFG_FCB:
+	LD	HL, CFG_FCB
+	LD	B, 36
+BUILD_CFG_CLR:
+	XOR	A
+	LD	(HL), A
+	INC	HL
+	DJNZ	BUILD_CFG_CLR
+	; Name field: "VTUNE   CFG" (8+3, space-padded)
+	LD	HL, CFG_FCB + 1
+	LD	DE, MSG_CFG_NAME
+	LD	B, 11
+BUILD_CFG_NAME:
+	LD	A, (DE)
+	LD	(HL), A
+	INC	HL
+	INC	DE
+	DJNZ	BUILD_CFG_NAME
+	RET
+
+; Parse one command-line file argument and classify extension.
+; If no extension is present, probe supported extensions in this order:
+;   .pt3, .pt2, .mym
+; Returns A = ERR_OK, ERR_NO_ARG, ERR_TOO_MANY_ARGS,
+;            ERR_UNSUPPORTED_FORMAT, ERR_INVALID_FILENAME, ERR_FILE_NOT_FOUND.
+PARSE_AND_CLASSIFY:
+	CALL	PARSE_CMDLINE
+	OR	A
+	RET	NZ
+	LD	A, (RUN_MODE)
+	CP	RUNMODE_LIST
+	JR	Z, PARSE_LIST_OK
+	CALL	CHECK_LIST_SWITCH
+	OR	A
+	JR	Z, PARSE_CLASSIFY_FILE
+PARSE_LIST_OK:
+	XOR	A
+	RET
+
+PARSE_CLASSIFY_FILE:
+	JP	CLASSIFY_ARG_EXTENSION
+
+; Detect "-list" switch (case-insensitive).
+; On match: sets RUN_MODE=RUNMODE_LIST and returns A=1.
+; Otherwise returns A=0.
+CHECK_LIST_SWITCH:
+	LD	HL, ARG_BUFFER
+	LD	A, (HL)
+	CP	'-'
+	JR	NZ, CHECK_LIST_NO
+	INC	HL
+
+	LD	A, (HL)
+	CALL	TO_UPPER
+	CP	'L'
+	JR	NZ, CHECK_LIST_NO
+	INC	HL
+
+	LD	A, (HL)
+	CALL	TO_UPPER
+	CP	'I'
+	JR	NZ, CHECK_LIST_NO
+	INC	HL
+
+	LD	A, (HL)
+	CALL	TO_UPPER
+	CP	'S'
+	JR	NZ, CHECK_LIST_NO
+	INC	HL
+
+	LD	A, (HL)
+	CALL	TO_UPPER
+	CP	'T'
+	JR	NZ, CHECK_LIST_NO
+	INC	HL
+
+	LD	A, (HL)
+	OR	A
+	JR	NZ, CHECK_LIST_NO
+
+	LD	A, RUNMODE_LIST
+	LD	(RUN_MODE), A
+	LD	A, 1
+	RET
+
+CHECK_LIST_NO:
+	XOR	A
+	RET
+
+; Compare NUL-terminated strings at HL and DE (ASCII case-insensitive). Z = match.
+STRCMP_UP:
+	LD	A, (HL)
+	PUSH	AF
+	CALL	TO_UPPER
+	LD	C, A
+	POP	AF
+	LD	A, (DE)
+	PUSH	AF
+	CALL	TO_UPPER
+	CP	C
+	POP	AF
+	RET	NZ
+	OR	A
+	RET	Z
+	INC	HL
+	INC	DE
+	JR	STRCMP_UP
+
+; Parse CP/M command tail: optional -debug, one filename. Returns A = error code.
+PARSE_CMDLINE:
+	LD	HL, $0080
+	LD	B, (HL)
+	INC	HL
+	XOR	A
+	LD	(DEBUG_FLAG), A
+	LD	(DELAYMD), A
+	LD	(HW_DETECT_MODE), A
+	XOR	A
+	LD	(ARG_HAVE), A
+
+PARSE_CL_SKIP:
+	LD	A, B
+	OR	A
+	JP	Z, PARSE_CL_FINISH
+	LD	A, (HL)
+	CP	' '
+	JR	NZ, PARSE_CL_TOKEN
+	INC	HL
+	DEC	B
+	JR	PARSE_CL_SKIP
+
+PARSE_CL_TOKEN:
+	LD	DE, ARG_SCRATCH
+	CP	'"'
+	JR	Z, PARSE_CL_QUOTED
+
+PARSE_CL_UNQ:
+	LD	A, B
+	OR	A
+	JR	Z, PARSE_CL_GOT
+	LD	A, (HL)
+	CP	' '
+	JR	Z, PARSE_CL_GOT
+	LD	(DE), A
+	INC	DE
+	INC	HL
+	DEC	B
+	JR	PARSE_CL_UNQ
+
+PARSE_CL_QUOTED:
+	INC	HL
+	DEC	B
+
+PARSE_CL_QLOOP:
+	LD	A, B
+	OR	A
+	JR	Z, PARSE_CL_GOT
+	LD	A, (HL)
+	CP	'"'
+	JR	Z, PARSE_CL_QEND
+	LD	(DE), A
+	INC	DE
+	INC	HL
+	DEC	B
+	JR	PARSE_CL_QLOOP
+
+PARSE_CL_QEND:
+	INC	HL
+	DEC	B
+
+PARSE_CL_GOT:
+	XOR	A
+	LD	(DE), A
+	LD	HL, ARG_SCRATCH
+	LD	DE, MSG_SWITCH_LIST
+	CALL	STRCMP_UP
+	JR	Z, PARSE_CL_LIST
+	LD	DE, MSG_SWITCH_MSX
+	CALL	STRCMP_UP
+	JR	Z, PARSE_CL_MSX
+	LD	DE, MSG_SWITCH_RC
+	CALL	STRCMP_UP
+	JR	Z, PARSE_CL_RC
+	LD	DE, MSG_SWITCH_COLECO
+	CALL	STRCMP_UP
+	JR	Z, PARSE_CL_COLECO
+	LD	DE, MSG_SWITCH_EB
+	CALL	STRCMP_UP
+	JR	Z, PARSE_CL_EB
+	LD	DE, MSG_SWITCH_DELAY
+	CALL	STRCMP_UP
+	JR	Z, PARSE_CL_DELAY
+	LD	DE, MSG_SWITCH_DEBUG
+	CALL	STRCMP_UP
+	JR	Z, PARSE_CL_DEBUG
+	LD	A, (ARG_HAVE)
+	OR	A
+	JR	NZ, PARSE_ERR_TOO_MANY
+	LD	A, 1
+	LD	(ARG_HAVE), A
+	LD	HL, ARG_SCRATCH
+	LD	DE, ARG_BUFFER
+PARSE_CL_COPY:
+	LD	A, (HL)
+	LD	(DE), A
+	OR	A
+	JP	Z, PARSE_CL_SKIP
+	INC	HL
+	INC	DE
+	JR	PARSE_CL_COPY
+
+PARSE_CL_LIST:
+	LD	A, RUNMODE_LIST
+	LD	(RUN_MODE), A
+	JP	PARSE_CL_SKIP
+
+PARSE_CL_MSX:
+	LD	A, HW_MODE_MSX
+	LD	(HW_DETECT_MODE), A
+	JP	PARSE_CL_SKIP
+
+PARSE_CL_RC:
+	LD	A, HW_MODE_RC
+	LD	(HW_DETECT_MODE), A
+	JP	PARSE_CL_SKIP
+
+PARSE_CL_COLECO:
+	LD	A, HW_MODE_COLECO
+	LD	(HW_DETECT_MODE), A
+	JP	PARSE_CL_SKIP
+
+PARSE_CL_EB:
+	LD	A, HW_MODE_EB
+	LD	(HW_DETECT_MODE), A
+	JP	PARSE_CL_SKIP
+
+PARSE_CL_DELAY:
+	LD	A, 1
+	LD	(DELAYMD), A
+	JP	PARSE_CL_SKIP
+
+PARSE_CL_DEBUG:
+	LD	A, 1
+	LD	(DEBUG_FLAG), A
+	JP	PARSE_CL_SKIP
+
+PARSE_CL_FINISH:
+	LD	A, (RUN_MODE)
+	CP	RUNMODE_LIST
+	JR	Z, PARSE_CL_DONE
+	LD	A, (ARG_HAVE)
+	OR	A
+	JR	Z, PARSE_ERR_NO_ARG
+PARSE_CL_DONE:
+	XOR	A
+	RET
+
+PARSE_ERR_NO_ARG:
+	LD	A, ERR_NO_ARG
+	RET
+
+PARSE_ERR_TOO_MANY:
+	LD	A, ERR_TOO_MANY_ARGS
+	RET
+
+; Classify ARG_BUFFER extension as PTx or MYM.
+; Returns A = ERR_OK or ERR_UNSUPPORTED_FORMAT.
+CLASSIFY_ARG_EXTENSION:
+	LD	HL, ARG_BUFFER
+	LD	DE, 0
+
+CLASS_SCAN_LOOP:
+	LD	A, (HL)
+	OR	A
+	JR	Z, CLASS_SCAN_DONE
+	CP	'.'
+	JR	NZ, CLASS_SCAN_NEXT
+	LD	D, H
+	LD	E, L
+
+CLASS_SCAN_NEXT:
+	INC	HL
+	JR	CLASS_SCAN_LOOP
+
+CLASS_SCAN_DONE:
+	LD	A, D
+	OR	E
+	JR	Z, CLASS_RESOLVE_MISSING_EXT
+	EX	DE, HL
+	INC	HL
+
+	LD	A, (HL)
+	OR	A
+	JR	Z, CLASS_UNSUPPORTED
+	CALL	TO_UPPER
+	CP	'P'
+	JR	Z, CLASS_TRY_PTX
+	CP	'M'
+	JR	Z, CLASS_TRY_MYM
+	JR	CLASS_UNSUPPORTED
+
+CLASS_TRY_PTX:
+	INC	HL
+	LD	A, (HL)
+	CALL	TO_UPPER
+	CP	'T'
+	JR	NZ, CLASS_UNSUPPORTED
+	INC	HL
+	LD	A, (HL)
+	CP	'2'
+	JR	Z, CLASS_PTX_END
+	CP	'3'
+	JR	NZ, CLASS_UNSUPPORTED
+
+CLASS_PTX_END:
+	INC	HL
+	LD	A, (HL)
+	OR	A
+	JR	NZ, CLASS_UNSUPPORTED
+	LD	A, ENGINE_PTX
+	LD	(FILE_ENGINE), A
+	XOR	A
+	RET
+
+CLASS_TRY_MYM:
+	INC	HL
+	LD	A, (HL)
+	CALL	TO_UPPER
+	CP	'Y'
+	JR	NZ, CLASS_UNSUPPORTED
+	INC	HL
+	LD	A, (HL)
+	CALL	TO_UPPER
+	CP	'M'
+	JR	NZ, CLASS_UNSUPPORTED
+	INC	HL
+	LD	A, (HL)
+	OR	A
+	JR	NZ, CLASS_UNSUPPORTED
+	LD	A, ENGINE_MYM
+	LD	(FILE_ENGINE), A
+	XOR	A
+	RET
+
+CLASS_UNSUPPORTED:
+	LD	A, ERR_UNSUPPORTED_FORMAT
+	RET
+
+CLASS_RESOLVE_MISSING_EXT:
+	JP	RESOLVE_MISSING_EXTENSION
+
+; Resolve extensionless ARG_BUFFER by probing files in this order:
+;   .PT3 -> .PT2 -> .MYM
+; On success, ARG_BUFFER is updated in-place with the found extension and
+; FILE_ENGINE is set accordingly.
+; Returns A = ERR_OK, ERR_INVALID_FILENAME, or ERR_FILE_NOT_FOUND.
+RESOLVE_MISSING_EXTENSION:
+	; Find NUL terminator in ARG_BUFFER (HL points at end).
+	LD	HL, ARG_BUFFER
+RESOLVE_FIND_END:
+	LD	A, (HL)
+	OR	A
+	JR	Z, RESOLVE_HAVE_END
+	INC	HL
+	JR	RESOLVE_FIND_END
+
+RESOLVE_HAVE_END:
+	PUSH	HL			; keep end pointer for each candidate and final restore
+
+	; Try .PT3 first
+	POP	HL
+	PUSH	HL
+	CALL	APPEND_EXT_PT3
+	CALL	BUILD_FCB_FROM_ARG
+	OR	A
+	JR	NZ, RESOLVE_FAIL_INVALID
+	CALL	PROBE_FCB_EXISTS
+	OR	A
+	JR	Z, RESOLVE_TRY_PT2
+	LD	A, ENGINE_PTX
+	LD	(FILE_ENGINE), A
+	POP	HL
+	XOR	A
+	RET
+
+RESOLVE_TRY_PT2:
+	POP	HL
+	PUSH	HL
+	CALL	APPEND_EXT_PT2
+	CALL	BUILD_FCB_FROM_ARG
+	OR	A
+	JR	NZ, RESOLVE_FAIL_INVALID
+	CALL	PROBE_FCB_EXISTS
+	OR	A
+	JR	Z, RESOLVE_TRY_MYM
+	LD	A, ENGINE_PTX
+	LD	(FILE_ENGINE), A
+	POP	HL
+	XOR	A
+	RET
+
+RESOLVE_TRY_MYM:
+	POP	HL
+	PUSH	HL
+	CALL	APPEND_EXT_MYM
+	CALL	BUILD_FCB_FROM_ARG
+	OR	A
+	JR	NZ, RESOLVE_FAIL_INVALID
+	CALL	PROBE_FCB_EXISTS
+	OR	A
+	JR	Z, RESOLVE_FAIL_NOT_FOUND
+	LD	A, ENGINE_MYM
+	LD	(FILE_ENGINE), A
+	POP	HL
+	XOR	A
+	RET
+
+RESOLVE_FAIL_INVALID:
+	POP	HL
+	LD	(HL), 0			; restore original extensionless ARG_BUFFER
+	LD	A, ERR_INVALID_FILENAME
+	RET
+
+RESOLVE_FAIL_NOT_FOUND:
+	POP	HL
+	LD	(HL), 0			; restore original extensionless ARG_BUFFER
+	LD	A, ERR_FILE_NOT_FOUND
+	RET
+
+; Append ".PT3" at end pointer HL (which must point to trailing NUL).
+APPEND_EXT_PT3:
+	LD	(HL), '.'
+	INC	HL
+	LD	(HL), 'P'
+	INC	HL
+	LD	(HL), 'T'
+	INC	HL
+	LD	(HL), '3'
+	INC	HL
+	LD	(HL), 0
+	RET
+
+; Append ".PT2" at end pointer HL (which must point to trailing NUL).
+APPEND_EXT_PT2:
+	LD	(HL), '.'
+	INC	HL
+	LD	(HL), 'P'
+	INC	HL
+	LD	(HL), 'T'
+	INC	HL
+	LD	(HL), '2'
+	INC	HL
+	LD	(HL), 0
+	RET
+
+; Append ".MYM" at end pointer HL (which must point to trailing NUL).
+APPEND_EXT_MYM:
+	LD	(HL), '.'
+	INC	HL
+	LD	(HL), 'M'
+	INC	HL
+	LD	(HL), 'Y'
+	INC	HL
+	LD	(HL), 'M'
+	INC	HL
+	LD	(HL), 0
+	RET
+
+; Probe FCB_WORK existence by open/close.
+; Returns A=1 if file exists, A=0 if missing.
+PROBE_FCB_EXISTS:
+	LD	DE, FCB_WORK
+	LD	C, $0F
+	CALL	BDOS
+	CP	$FF
+	JR	Z, PROBE_FCB_MISS
+	LD	DE, FCB_WORK
+	LD	C, $10
+	CALL	BDOS
+	LD	A, 1
+	RET
+
+PROBE_FCB_MISS:
+	XOR	A
+	RET
+
+; Stage 2 validation: build CP/M FCB from argument and verify open/read path.
+; Returns A = ERR_OK, ERR_INVALID_FILENAME, ERR_FILE_NOT_FOUND, ERR_FILE_READ.
+VALIDATE_FILE_ACCESS:
+	CALL	BUILD_FCB_FROM_ARG
+	OR	A
+	RET	NZ
+
+	LD	DE, FCB_WORK
+	LD	C, $0F
+	CALL	BDOS
+	CP	$FF
+	JR	Z, VALIDATE_FILE_MISSING
+
+	LD	DE, DMA_BUFFER
+	LD	C, $1A
+	CALL	BDOS
+
+	LD	DE, FCB_WORK
+	LD	C, $14
+	CALL	BDOS
+	CP	0
+	JR	Z, VALIDATE_FILE_CLOSE_OK
+	CP	1
+	JR	Z, VALIDATE_FILE_CLOSE_OK
+
+	LD	DE, FCB_WORK
+	LD	C, $10
+	CALL	BDOS
+	LD	A, ERR_FILE_READ
+	RET
+
+VALIDATE_FILE_CLOSE_OK:
+	LD	DE, FCB_WORK
+	LD	C, $10
+	CALL	BDOS
+	XOR	A
+	RET
+
+VALIDATE_FILE_MISSING:
+	LD	A, ERR_FILE_NOT_FOUND
+	RET
+
+; Stage 2 lightweight structural checks from first DMA block.
+; Returns A = ERR_OK or ERR_INVALID_DATA.
+VALIDATE_FORMAT_STRUCTURE:
+	LD	A, (FILE_ENGINE)
+	CP	ENGINE_MYM
+	JR	Z, VALIDATE_MYM_STRUCTURE
+	CP	ENGINE_PTX
+	JR	Z, VALIDATE_PTX_STRUCTURE
+	LD	A, ERR_INVALID_DATA
+	RET
+
+VALIDATE_MYM_STRUCTURE:
+	LD	A, (DMA_BUFFER)
+	CP	$92
+	JP	NZ, VALIDATE_FORMAT_INVALID
+	LD	A, (DMA_BUFFER+1)
+	OR	A
+	JP	Z, VALIDATE_FORMAT_INVALID
+	CP	64
+	JP	NC, VALIDATE_FORMAT_INVALID
+	XOR	A
+	RET
+
+VALIDATE_PTX_STRUCTURE:
+	CALL	PTX_PRINTABLE_PREFIX
+	OR	A
+	JP	NZ, VALIDATE_FORMAT_INVALID
+	CALL	PTX_MATCH_VORTEX_HEADER
+	OR	A
+	JR	Z, VALIDATE_PTX_OK
+	CALL	PTX_MATCH_PROTRACKER_HEADER
+	OR	A
+	JP	NZ, VALIDATE_FORMAT_INVALID
+
+VALIDATE_PTX_OK:
+	XOR	A
+	RET
+
+PTX_PRINTABLE_PREFIX:
+	LD	HL, DMA_BUFFER
+	LD	B, 16
+
+PTX_PRINTABLE_LOOP:
+	LD	A, (HL)
+	CALL	IS_PRINTABLE_ASCII
+	JR	NZ, PTX_PRINTABLE_BAD
+	INC	HL
+	DJNZ	PTX_PRINTABLE_LOOP
+	XOR	A
+	RET
+
+PTX_PRINTABLE_BAD:
+	LD	A, 1
+	RET
+
+PTX_MATCH_VORTEX_HEADER:
+	LD	HL, DMA_BUFFER
+	JR	PTX_MATCH_VORTEX_HL
+
+PTX_MATCH_VORTEX_MUSIC:
+	LD	HL, MUSIC_BUF
+
+PTX_MATCH_VORTEX_HL:
+	LD	A, (HL)
+	CP	'V'
+	JR	NZ, PTX_VORTEX_BAD
+	INC	HL
+	LD	A, (HL)
+	CP	'o'
+	JR	NZ, PTX_VORTEX_BAD
+	INC	HL
+	LD	A, (HL)
+	CP	'r'
+	JR	NZ, PTX_VORTEX_BAD
+	INC	HL
+	LD	A, (HL)
+	CP	't'
+	JR	NZ, PTX_VORTEX_BAD
+	INC	HL
+	LD	A, (HL)
+	CP	'e'
+	JR	NZ, PTX_VORTEX_BAD
+	INC	HL
+	LD	A, (HL)
+	CP	'x'
+	JR	NZ, PTX_VORTEX_BAD
+	INC	HL
+	LD	A, (HL)
+	CP	' '
+	JR	NZ, PTX_VORTEX_BAD
+	INC	HL
+	LD	A, (HL)
+	CP	'T'
+	JR	NZ, PTX_VORTEX_BAD
+	INC	HL
+	LD	A, (HL)
+	CP	'r'
+	JR	NZ, PTX_VORTEX_BAD
+	INC	HL
+	LD	A, (HL)
+	CP	'a'
+	JR	NZ, PTX_VORTEX_BAD
+	INC	HL
+	LD	A, (HL)
+	CP	'c'
+	JR	NZ, PTX_VORTEX_BAD
+	INC	HL
+	LD	A, (HL)
+	CP	'k'
+	JR	NZ, PTX_VORTEX_BAD
+	INC	HL
+	LD	A, (HL)
+	CP	'e'
+	JR	NZ, PTX_VORTEX_BAD
+	INC	HL
+	LD	A, (HL)
+	CP	'r'
+	JR	NZ, PTX_VORTEX_BAD
+	XOR	A
+	RET
+
+PTX_VORTEX_BAD:
+	LD	A, 1
+	RET
+
+PTX_MATCH_PROTRACKER_HEADER:
+	LD	HL, DMA_BUFFER
+	JR	PTX_MATCH_PROTRACKER_HL
+
+PTX_MATCH_PROTRACKER_MUSIC:
+	LD	HL, MUSIC_BUF
+
+PTX_MATCH_PROTRACKER_HL:
+	LD	A, (HL)
+	CP	'P'
+	JR	NZ, PTX_PROTRACKER_BAD
+	INC	HL
+	LD	A, (HL)
+	CP	'r'
+	JR	NZ, PTX_PROTRACKER_BAD
+	INC	HL
+	LD	A, (HL)
+	CP	'o'
+	JR	NZ, PTX_PROTRACKER_BAD
+	INC	HL
+	LD	A, (HL)
+	CP	'T'
+	JR	NZ, PTX_PROTRACKER_BAD
+	INC	HL
+	LD	A, (HL)
+	CP	'r'
+	JR	NZ, PTX_PROTRACKER_BAD
+	INC	HL
+	LD	A, (HL)
+	CP	'a'
+	JR	NZ, PTX_PROTRACKER_BAD
+	INC	HL
+	LD	A, (HL)
+	CP	'c'
+	JR	NZ, PTX_PROTRACKER_BAD
+	INC	HL
+	LD	A, (HL)
+	CP	'k'
+	JR	NZ, PTX_PROTRACKER_BAD
+	INC	HL
+	LD	A, (HL)
+	CP	'e'
+	JR	NZ, PTX_PROTRACKER_BAD
+	INC	HL
+	LD	A, (HL)
+	CP	'r'
+	JR	NZ, PTX_PROTRACKER_BAD
+	INC	HL
+	LD	A, (HL)
+	CP	' '
+	JR	NZ, PTX_PROTRACKER_BAD
+	XOR	A
+	RET
+
+PTX_PROTRACKER_BAD:
+	LD	A, 1
+	RET
+
+IS_PRINTABLE_ASCII:
+	CP	32
+	JR	C, IS_PRINTABLE_BAD
+	CP	127
+	JR	NC, IS_PRINTABLE_BAD
+	XOR	A
+	RET
+
+IS_PRINTABLE_BAD:
+	LD	A, 1
+	RET
+
+VALIDATE_FORMAT_INVALID:
+	LD	A, ERR_INVALID_DATA
+	RET
+
+; Stage 3 validation: engine-specific initialization checkpoint.
+; Returns A = ERR_OK, ERR_INVALID_DATA, or ERR_ENGINE_INIT.
+ENGINE_INIT:
+	LD	A, (FILE_ENGINE)
+	CP	ENGINE_PTX
+	JP	Z, ENGINE_INIT_PTX
+	CP	ENGINE_MYM
+	JP	Z, ENGINE_INIT_MYM
+	LD	A, ERR_INVALID_DATA
+	RET
+
+ENGINE_INIT_PTX:
+	CALL	PTX_MATCH_VORTEX_MUSIC
+	OR	A
+	JP	Z, ENGINE_INIT_PTX_VORTEX
+	CALL	PTX_MATCH_PROTRACKER_MUSIC
+	OR	A
+	JP	Z, ENGINE_INIT_PTX_PROTRACKER
+	LD	A, ERR_INVALID_DATA
+	RET
+
+ENGINE_INIT_PTX_VORTEX:
+	LD	A, PTX_VARIANT_VORTEX
+	LD	(PTX_VARIANT), A
+	LD	A, 1
+	LD	(ENGINE_READY), A
+	; Reset PTx engine state
+	XOR	A
+	LD	(PTX_STATE_POS), A
+	LD	(PTX_STATE_POS+1), A
+	XOR	A
+	RET
+
+ENGINE_INIT_PTX_PROTRACKER:
+	LD	A, PTX_VARIANT_PROTRACKER
+	LD	(PTX_VARIANT), A
+	LD	A, 1
+	LD	(ENGINE_READY), A
+	XOR	A
+	LD	(PTX_STATE_POS), A
+	LD	(PTX_STATE_POS+1), A
+	CALL	BULBA_SYNC_PORTS
+	XOR	A
+	LD	(BULBA_START + 10), A
+	CALL	BULBA_START
+	XOR	A
+	RET
+
+ENGINE_INIT_MYM:
+	LD	A, (DMA_BUFFER+1)
+	LD	(MYM_FRAME_HINT), A
+	LD	A, 1
+	LD	(ENGINE_READY), A
+	; Reset MYM frame pointer to start of MUSIC_BUF
+	LD	HL, MUSIC_BUF
+	LD	(MYM_STATE_PTR), HL
+	XOR	A
+	RET
+
+; Milestone 3: Scan current drive for .PT2/.PT3/.MYM files.
+; Fills TRACK_LIST with NUL-terminated 8.3 name strings (TRACK_NAME_LEN each).
+; Sets TRACK_COUNT. Returns A = count.
+; Ordering follows CP/M directory slot order which is deterministic per disk image.
+SCAN_TRACKS:
+	XOR	A
+	LD	(TRACK_COUNT), A
+	LD	(TRACK_SELECTED), A
+
+	; Clear wildcard FCB
+	LD	HL, SCAN_FCB
+	LD	B, 36
+SCAN_FCB_CLR:
+	XOR	A
+	LD	(HL), A
+	INC	HL
+	DJNZ	SCAN_FCB_CLR
+
+	; Fill name+ext fields with '?'
+	LD	HL, SCAN_FCB+1
+	LD	B, 11
+SCAN_FCB_WILD:
+	LD	(HL), '?'
+	INC	HL
+	DJNZ	SCAN_FCB_WILD
+
+	; Set DMA to DMA_BUFFER
+	LD	DE, DMA_BUFFER
+	LD	C, $1A
+	CALL	BDOS
+
+	; Search first
+	LD	DE, SCAN_FCB
+	LD	C, $11
+	CALL	BDOS
+	CP	$FF
+	JP	Z, SCAN_DONE
+
+SCAN_LOOP:
+	; A = entry index (0-3) in DMA_BUFFER; each entry = 32 bytes
+	LD	L, A
+	LD	H, 0
+	ADD	HL, HL
+	ADD	HL, HL
+	ADD	HL, HL
+	ADD	HL, HL
+	ADD	HL, HL
+	LD	DE, DMA_BUFFER
+	ADD	HL, DE
+
+	; Skip deleted entries ($E5).
+	; Do not force user 0 here: BDOS search already scopes to current user area.
+	LD	A, (HL)
+	CP	$E5
+	JP	Z, SCAN_NEXT
+
+	; Extract name/ext, check for supported extension
+	PUSH	HL
+	CALL	EXTRACT_TRACK_NAME
+	POP	HL
+	OR	A
+	JP	Z, SCAN_NEXT
+
+	; Deduplicate: skip if already in list
+	CALL	TRACK_LIST_FIND
+	OR	A
+	JP	NZ, SCAN_NEXT
+
+	; Add to track list
+	CALL	TRACK_LIST_ADD
+
+SCAN_NEXT:
+	LD	DE, SCAN_FCB
+	LD	C, $12
+	CALL	BDOS
+	CP	$FF
+	JP	Z, SCAN_DONE
+	JP	SCAN_LOOP
+
+SCAN_DONE:
+	; Restore DMA to default ($0080) before returning from scan.
+	; The DMA was set to DMA_BUFFER during BDOS 11h/12h calls; if we don't restore it,
+	; any subsequent BDOS call may read/write wrong location, corrupting memory.
+	LD	DE, $0080
+	LD	C, $1A
+	CALL	BDOS
+	LD	A, (TRACK_COUNT)
+	RET
+
+; Extract name from directory entry at HL into SCAN_NAME_BUF.
+; Checks extension against PT2/PT3/MYM.
+; Returns A=1 if supported, A=0 if not.
+EXTRACT_TRACK_NAME:
+	PUSH	BC
+	PUSH	DE
+	PUSH	HL
+
+	INC	HL		; skip user byte
+	LD	DE, SCAN_NAME_BUF
+	LD	B, 8
+
+EXTR_NAME_LOOP:
+	LD	A, (HL)
+	INC	HL		; always advance
+	AND	$7F		; strip attribute bit
+	CP	' '
+	JR	Z, EXTR_NAME_SKIP
+	LD	(DE), A
+	INC	DE
+EXTR_NAME_SKIP:
+	DJNZ	EXTR_NAME_LOOP
+
+	; HL now points to ext[0]; copy 3 ext bytes to SCAN_EXT_BUF
+	LD	A, (HL)
+	AND	$7F
+	LD	(SCAN_EXT_BUF), A
+	INC	HL
+	LD	A, (HL)
+	AND	$7F
+	LD	(SCAN_EXT_BUF+1), A
+	INC	HL
+	LD	A, (HL)
+	AND	$7F
+	LD	(SCAN_EXT_BUF+2), A
+
+	; Check: PT2
+	LD	A, (SCAN_EXT_BUF)
+	CP	'P'
+	JR	NZ, EXTR_TRY_MYM
+	LD	A, (SCAN_EXT_BUF+1)
+	CP	'T'
+	JR	NZ, EXTR_TRY_MYM
+	LD	A, (SCAN_EXT_BUF+2)
+	CP	'2'
+	JR	Z, EXTR_EXT_OK
+	CP	'3'
+	JR	Z, EXTR_EXT_OK
+	JR	EXTR_UNSUPPORTED
+
+EXTR_TRY_MYM:
+	LD	A, (SCAN_EXT_BUF)
+	CP	'M'
+	JR	NZ, EXTR_UNSUPPORTED
+	LD	A, (SCAN_EXT_BUF+1)
+	CP	'Y'
+	JR	NZ, EXTR_UNSUPPORTED
+	LD	A, (SCAN_EXT_BUF+2)
+	CP	'M'
+	JR	NZ, EXTR_UNSUPPORTED
+
+EXTR_EXT_OK:
+	; Append '.' + 3 ext chars + NUL to DE
+	LD	A, '.'
+	LD	(DE), A
+	INC	DE
+	LD	A, (SCAN_EXT_BUF)
+	LD	(DE), A
+	INC	DE
+	LD	A, (SCAN_EXT_BUF+1)
+	LD	(DE), A
+	INC	DE
+	LD	A, (SCAN_EXT_BUF+2)
+	LD	(DE), A
+	INC	DE
+	XOR	A
+	LD	(DE), A
+	POP	HL
+	POP	DE
+	POP	BC
+	LD	A, 1
+	RET
+
+EXTR_UNSUPPORTED:
+	POP	HL
+	POP	DE
+	POP	BC
+	XOR	A
+	RET
+
+; Search TRACK_LIST for SCAN_NAME_BUF.
+; Returns A=1 if found, A=0 if not.
+TRACK_LIST_FIND:
+	LD	A, (TRACK_COUNT)
+	OR	A
+	JR	Z, TRACK_FIND_NOTFOUND
+	LD	B, A
+	LD	HL, TRACK_LIST
+
+TRACK_FIND_LOOP:
+	LD	DE, SCAN_NAME_BUF
+	PUSH	HL
+	PUSH	BC
+	LD	B, TRACK_NAME_LEN
+
+TRACK_CMP_LOOP:
+	LD	A, (DE)
+	CP	(HL)
+	JR	NZ, TRACK_CMP_MISS
+	OR	A
+	JR	Z, TRACK_CMP_MATCH
+	INC	HL
+	INC	DE
+	DJNZ	TRACK_CMP_LOOP
+
+TRACK_CMP_MATCH:
+	POP	BC
+	POP	HL
+	LD	A, 1
+	RET
+
+TRACK_CMP_MISS:
+	POP	BC
+	POP	HL
+	LD	DE, TRACK_NAME_LEN
+	ADD	HL, DE
+	DJNZ	TRACK_FIND_LOOP
+
+TRACK_FIND_NOTFOUND:
+	XOR	A
+	RET
+
+; Add SCAN_NAME_BUF to TRACK_LIST if not full.
+TRACK_LIST_ADD:
+	LD	A, (TRACK_COUNT)
+	CP	MAX_TRACKS
+	RET	NC
+	; Compute destination: TRACK_LIST + count * TRACK_NAME_LEN
+	LD	B, A
+	LD	HL, 0
+TRACK_ADD_MUL:
+	LD	A, B
+	OR	A
+	JR	Z, TRACK_ADD_MUL_DONE
+	DEC	B
+	LD	DE, TRACK_NAME_LEN
+	ADD	HL, DE
+	JR	TRACK_ADD_MUL
+TRACK_ADD_MUL_DONE:
+	LD	DE, TRACK_LIST
+	ADD	HL, DE
+	; Copy SCAN_NAME_BUF to HL (TRACK_NAME_LEN bytes)
+	LD	DE, SCAN_NAME_BUF
+	LD	B, TRACK_NAME_LEN
+TRACK_ADD_COPY:
+	LD	A, (DE)
+	LD	(HL), A
+	INC	HL
+	INC	DE
+	DJNZ	TRACK_ADD_COPY
+	LD	HL, TRACK_COUNT
+	INC	(HL)
+	RET
+
+; Print all tracks in TRACK_LIST.
+; Selected item (index == TRACK_SELECTED) is prefixed with "> ".
+; All others are prefixed with "  ".
+PRINT_TRACK_LIST:
+	LD	A, (TRACK_COUNT)
+	OR	A
+	RET	Z
+	LD	B, A		; B = loop counter (TRACK_COUNT down to 1)
+	LD	C, 0		; C = current 0-based index
+	LD	HL, TRACK_LIST
+
+PRINT_TRACK_LOOP:
+	PUSH	BC
+	PUSH	HL
+	; Compare C (current index) to TRACK_SELECTED
+	LD	A, (TRACK_SELECTED)
+	CP	C
+	JR	NZ, PRINT_TRACK_UNSEL
+	LD	A, '>'
+	CALL	PRTCHR
+	LD	A, ' '
+	CALL	PRTCHR
+	JR	PRINT_TRACK_NAME
+PRINT_TRACK_UNSEL:
+	LD	A, ' '
+	CALL	PRTCHR
+	LD	A, ' '
+	CALL	PRTCHR
+PRINT_TRACK_NAME:
+	LD	D, H
+	LD	E, L
+	CALL	PRTSTR
+	CALL	CRLF
+	POP	HL
+	LD	DE, TRACK_NAME_LEN
+	ADD	HL, DE
+	POP	BC
+	INC	C		; advance 0-based index
+	DJNZ	PRINT_TRACK_LOOP
+	RET
+
+; Print A as decimal (0-99).
+PRINT_DECIMAL_BYTE:
+	LD	B, 0
+PRINT_DEC_TENS:
+	CP	10
+	JR	C, PRINT_DEC_EMIT
+	SUB	10
+	INC	B
+	JR	PRINT_DEC_TENS
+PRINT_DEC_EMIT:
+	PUSH	AF
+	LD	A, B
+	OR	A
+	JR	Z, PRINT_DEC_UNITS
+	ADD	A, '0'
+	CALL	PRTCHR
+PRINT_DEC_UNITS:
+	POP	AF
+	ADD	A, '0'
+	JP	PRTCHR
+
+;===============================================================================
+; Milestone 4: Playback architecture foundation
+;===============================================================================
+
+; Write AY register REG with value VAL.
+; Inputs: B = register number (0-13), C = value.
+; Clobbers: AF.
+PSG_WRITE_REG:
+	PUSH	BC
+	CALL	PSG_IO_SLOW_ENTER
+	LD	A, C			; Save value
+	LD	(PSG_TEMP_VAL), A
+	LD	A, (PSG_REG_PORT)	; Load RSEL port
+	LD	C, A
+	LD	A, B			; Register number
+	LD	B, 0
+	OUT	(C), A			; Write register select
+	LD	A, (PSG_DATA_PORT)	; Load RDAT port
+	LD	C, A
+	LD	A, (PSG_TEMP_VAL)	; Recover value
+	OUT	(C), A			; Write data
+	CALL	PSG_IO_SLOW_EXIT
+	POP	BC
+	RET
+
+
+
+; Write AY register REG with value VAL to optional chip B.
+; Inputs: B = register number (0-13), C = value.
+; Clobbers: AF, D, E.
+PSG_WRITE_REG_B:
+	PUSH	BC
+	CALL	PSG_IO_SLOW_ENTER
+	LD	A, C			; Save value
+	LD	(PSG_TEMP_VAL), A
+	LD	A, (PSG2_REG_PORT)	; Load RSEL port for chip B
+	LD	C, A
+	LD	A, B			; Register number
+	LD	B, 0
+	OUT	(C), A			; Write register select
+	LD	A, (PSG2_DATA_PORT)	; Load RDAT port for chip B
+	LD	C, A
+	LD	A, (PSG_TEMP_VAL)	; Recover value
+	OUT	(C), A			; Write data
+	CALL	PSG_IO_SLOW_EXIT
+	POP	BC
+	RET
+
+; Milestone 8 prep: route register writes through output mode.
+; AUDIO_OUT_AY: write only chip A.
+; AUDIO_OUT_TURBOSOUND: mirror writes to both chips.
+PSG_WRITE_ROUTED:
+	LD	A, 1
+	LD	(PSG_TOUCHED), A
+	LD	A, (AUDIO_OUT_MODE)
+	CP	AUDIO_OUT_TURBOSOUND
+	JR	NZ, PSG_WRITE_ROUTED_A
+	CALL	PSG_WRITE_REG
+	JP	PSG_WRITE_REG_B
+PSG_WRITE_ROUTED_A:
+	JP	PSG_WRITE_REG
+
+; Read AY register REG.
+; Input:  B = register number (0-13).
+; Output: A = value read.
+; Clobbers: AF, C.
+PSG_READ_REG:
+	PUSH	BC
+	CALL	PSG_IO_SLOW_ENTER
+	LD	A, (PSG_REG_PORT)	; Load RSEL port
+	LD	C, A
+	LD	A, B			; Register number
+	LD	B, 0
+	OUT	(C), A			; Write register select
+	LD	A, (PSG_DATA_PORT)	; Load RDAT port
+	LD	C, A
+	IN	A, (C)			; Read data
+	CALL	PSG_IO_SLOW_EXIT
+	POP	BC
+	RET
+
+; Z180 slow I/O (tune.com SLOWIO/NORMIO). Z180_IO_BASE=$C0 on RCZ180 EB per CFGTBL.
+PSG_IO_SLOW_ENTER:
+	PUSH	AF
+	PUSH	BC
+	LD	A, (Z180_IO_BASE)
+	CP	$FF
+	JR	Z, PSG_IO_ENTER_DONE
+	ADD	A, $32
+	LD	C, A
+	LD	B, 0
+	IN	A, (C)
+	LD	(PSG_IO_DCSAV), A
+	OR	$30
+	OUT	(C), A
+PSG_IO_ENTER_DONE:
+	POP	BC
+	POP	AF
+	RET
+
+PSG_IO_SLOW_EXIT:
+	PUSH	AF
+	PUSH	BC
+	LD	A, (Z180_IO_BASE)
+	CP	$FF
+	JR	Z, PSG_IO_EXIT_DONE
+	ADD	A, $32
+	LD	C, A
+	LD	B, 0
+	LD	A, (PSG_IO_DCSAV)
+	OUT	(C), A
+PSG_IO_EXIT_DONE:
+	POP	BC
+	POP	AF
+	RET
+
+; Bulk-write 14 AY registers from (HL). Matches tune.com ROUT/LOUT for RomWBW.
+; Input: HL = register block (regs 0-13).
+PSG_ROUT_BLOCK:
+	LD	A, 1
+	LD	(PSG_TOUCHED), A
+	DI
+	CALL	PSG_IO_SLOW_ENTER
+	LD	A, (PSG_DATA_PORT)
+	LD	D, A
+	LD	A, (PSG_REG_PORT)
+	LD	E, A
+	LD	B, 13
+	XOR	A
+	LD	C, E
+PSG_ROUT_LOOP:
+	OUT	(C), A
+	LD	C, D
+	OUTI
+	LD	C, E
+	INC	A
+	CP	13
+	JR	NZ, PSG_ROUT_LOOP
+	OUT	(C), A
+	LD	A, (HL)
+	AND	A
+	JP	M, PSG_ROUT_DONE
+	LD	C, D
+	OUT	(C), A
+PSG_ROUT_DONE:
+	CALL	PSG_IO_SLOW_EXIT
+	EI
+	RET
+
+; Mute like tune.com MUTE+ROUT: zero shadow block, flush to hardware.
+PSG_MUTE_ROUT:
+	LD	HL, PSG_MUTE_REGS
+	LD	B, 14
+	XOR	A
+PSG_MUTE_ZERO:
+	LD	(HL), A
+	INC	HL
+	DJNZ	PSG_MUTE_ZERO
+	LD	HL, PSG_MUTE_REGS
+	JP	PSG_ROUT_BLOCK
+
+; tune.com MUTEVIAHBIOS / exit path when HBIOS sound driver is available.
+PSG_MUTE_HBIOS:
+	LD	B, BF_SNDRESET
+	LD	C, 0
+	RST	08
+	RET
+
+PSG_MUTE_ALL:
+	LD	A, 1
+	LD	(PSG_TOUCHED), A
+	; tune.com default: direct ROUT mute (zeros + bulk write), not BF_SNDRESET.
+	JP	PSG_MUTE_ROUT
+
+PSG_SILENCE:
+	JP	PSG_MUTE_ALL
+
+; Pause: mixer all-off only (reg 7=$3F). Avoids ROUT zero-fill pops on Space.
+PSG_MIXER_OFF:
+	LD	B, 7
+	LD	C, $3F
+	JP	PSG_WRITE_ROUTED
+
+PSG_MUTE_DIRECT:
+	JP	PSG_MUTE_ALL
+
+PSG_MUTE_IF_VALID:
+	LD	A, (PSG_HW_VALID)
+	OR	A
+	RET	Z
+	JP	PSG_MUTE_ALL
+
+; Playback state machine dispatcher.
+; Called once per audio frame (50 Hz, polled in M6 main loop).
+; Checks PLAY_STATE; if PLAYING dispatches to per-engine tick.
+; Returns: nothing. All registers preserved.
+PLAYBACK_TICK:
+	PUSH	AF
+	PUSH	BC
+	PUSH	DE
+	PUSH	HL
+	LD	A, (PLAY_STATE)
+	CP	PLAY_PLAYING
+	JR	NZ, PLAYBACK_TICK_DONE
+	; Dispatch on FILE_ENGINE
+	LD	A, (FILE_ENGINE)
+	CP	ENGINE_PTX
+	JP	Z, PTX_ENGINE_TICK
+	CP	ENGINE_MYM
+	JP	Z, MYM_ENGINE_TICK
+PLAYBACK_TICK_DONE:
+	POP	HL
+	POP	DE
+	POP	BC
+	POP	AF
+	RET
+
+;-------------------------------------------------------------------------------
+; Milestone 5: PTx engine — PT3 uses Bulba player from tune.asm (pt3bulba.inc).
+;-------------------------------------------------------------------------------
+#include "pt3bulba_shim.inc"
+#include "pt3bulba.inc"
+
+#include "timing.inc"
+
+#DEFINE PTX_HDR_OFFSET $62
+
+PTX_ENGINE_TICK:
+	LD	A, (PTX_VARIANT)
+	CP	PTX_VARIANT_PROTRACKER
+	JR	Z, PTX_ENGINE_TICK_PT3
+	; Vortex / unknown: legacy frame counter (proof path retained)
+	LD	HL, PTX_STATE_POS
+	INC	(HL)
+	JR	NZ, PTX_TICK_PROOF
+	INC	HL
+	INC	(HL)
+PTX_TICK_PROOF:
+	LD	HL, MUSIC_BUF
+	LD	A, (HL)
+	LD	C, A
+	LD	B, 0
+	CALL	PSG_WRITE_ROUTED
+	JP	PLAYBACK_TICK_DONE
+
+PTX_ENGINE_TICK_PT3:
+	CALL	BULBA_START + 5
+	LD	A, 1
+	LD	(PSG_TOUCHED), A
+	JP	PLAYBACK_TICK_DONE
+
+;-------------------------------------------------------------------------------
+; Milestone 5: MYM engine tick
+; MYM format: 14 AY register bytes per frame, frames stored interleaved.
+; State: MYM_STATE_PTR (2 bytes) = pointer to current frame in MUSIC_BUF.
+; Each tick: write registers 0-13 from current frame, advance pointer by 14.
+; Stops (silences) when pointer exceeds MUSIC_BUF + MUSIC_SIZE.
+;-------------------------------------------------------------------------------
+#DEFINE MYM_FRAME_SIZE 14
+
+MYM_ENGINE_TICK:
+	; Load current frame pointer
+	LD	HL, (MYM_STATE_PTR)
+	; Check end of data: HL >= MUSIC_BUF + MUSIC_SIZE?
+	LD	DE, (MUSIC_SIZE)
+	LD	BC, MUSIC_BUF
+	; end_ptr = MUSIC_BUF + MUSIC_SIZE
+	LD	A, C
+	ADD	A, E
+	LD	E, A
+	LD	A, B
+	ADC	A, D
+	LD	D, A		; DE = end_ptr
+	; Compare HL >= DE
+	LD	A, H
+	CP	D
+	JR	C, MYM_WRITE_FRAME	; HL < DE: still data
+	JR	NZ, MYM_TICK_STOP	; HL > DE: past end
+	LD	A, L
+	CP	E
+	JR	NC, MYM_TICK_STOP	; HL >= DE: at or past end
+
+MYM_WRITE_FRAME:
+	PUSH	HL
+	CALL	PSG_ROUT_BLOCK
+	POP	HL
+	LD	DE, MYM_FRAME_SIZE
+	ADD	HL, DE
+	LD	(MYM_STATE_PTR), HL
+	JP	PLAYBACK_TICK_DONE
+
+MYM_TICK_STOP:
+	CALL	PSG_SILENCE
+	LD	A, PLAY_STOPPED
+	LD	(PLAY_STATE), A
+	JP	PLAYBACK_TICK_DONE
+
+;===============================================================================
+; Milestone 6: Main playback loop, keystroke dispatch, loop/nav state
+;===============================================================================
+
+; Main playback loop. Entered after LOAD_MUSIC_FILE succeeds.
+; Each iteration: tick engine, poll key, dispatch action, frame delay.
+; Exits when PLAY_STOPPED and no restart needed, or on quit.
+MAIN_LOOP:
+	CALL	PLAYBACK_TICK
+
+	; Non-blocking key poll (same as tune.com: BDOS 06h direct, E=FF).
+	LD	C, $06
+	LD	E, $FF
+	CALL	BDOS
+	OR	A
+	JP	Z, MAIN_LOOP_NODELAY
+	AND	$7F
+	OR	A
+	JP	Z, MAIN_LOOP_NODELAY
+
+	; Key dispatch
+	CP	KEY_QUIT
+	JP	Z, MAIN_QUIT
+	CP	KEY_QUIT_L
+	JP	Z, MAIN_QUIT
+	CP	KEY_QUIT_ESC
+	JP	Z, MAIN_QUIT
+	CP	KEY_QUIT_CTRL_C
+	JP	Z, MAIN_QUIT
+	CP	KEY_PAUSE
+	JP	Z, MAIN_PAUSE_TOGGLE
+	CP	KEY_NEXT
+	JP	Z, MAIN_NEXT
+	CP	KEY_NEXT_L
+	JP	Z, MAIN_NEXT
+	CP	KEY_PREV
+	JP	Z, MAIN_PREV
+	CP	KEY_PREV_L
+	JP	Z, MAIN_PREV
+	CP	KEY_LOOP
+	JP	Z, MAIN_LOOP_TOGGLE
+	CP	KEY_LOOP_L
+	JP	Z, MAIN_LOOP_TOGGLE
+	JP	MAIN_LOOP_NODELAY
+
+MAIN_QUIT:
+	JP	START_EXIT
+
+MAIN_PAUSE_TOGGLE:
+	LD	A, (PLAY_STATE)
+	CP	PLAY_PLAYING
+	JR	NZ, MAIN_RESUME
+	LD	A, PLAY_PAUSED
+	LD	(PLAY_STATE), A
+	CALL	PSG_MIXER_OFF
+	LD	DE, MSG_STATE_PAUSED
+	CALL	PRTSTR
+	CALL	CRLF
+	JR	MAIN_LOOP_NODELAY
+MAIN_RESUME:
+	CP	PLAY_PAUSED
+	JR	NZ, MAIN_LOOP_NODELAY
+	LD	A, PLAY_PLAYING
+	LD	(PLAY_STATE), A
+	LD	DE, MSG_STATE_PLAYING
+	CALL	PRTSTR
+	CALL	CRLF
+	JR	MAIN_LOOP_NODELAY
+
+MAIN_NEXT:
+	LD	A, (TRACK_COUNT)
+	OR	A
+	JR	Z, MAIN_LOOP_NODELAY
+	LD	A, (TRACK_SELECTED)
+	INC	A
+	LD	HL, TRACK_COUNT
+	CP	(HL)
+	JR	C, MAIN_NEXT_OK
+	XOR	A				; wrap to 0
+MAIN_NEXT_OK:
+	LD	(TRACK_SELECTED), A
+	JP	MAIN_RELOAD_TRACK
+
+MAIN_PREV:
+	LD	A, (TRACK_COUNT)
+	OR	A
+	JR	Z, MAIN_LOOP_NODELAY
+	LD	A, (TRACK_SELECTED)
+	OR	A
+	JR	NZ, MAIN_PREV_DEC
+	LD	A, (TRACK_COUNT)
+	DEC	A				; wrap to last
+	JR	MAIN_PREV_OK
+MAIN_PREV_DEC:
+	DEC	A
+MAIN_PREV_OK:
+	LD	(TRACK_SELECTED), A
+	JP	MAIN_RELOAD_TRACK
+
+MAIN_LOOP_TOGGLE:
+	LD	A, (LOOP_MODE)
+	INC	A
+	CP	LOOP_PLAYLIST + 1
+	JR	C, MAIN_LOOP_TOGGLE_OK
+	XOR	A
+MAIN_LOOP_TOGGLE_OK:
+	LD	(LOOP_MODE), A
+	CP	LOOP_NONE
+	JR	NZ, MAIN_LOOP_MSG_TRACK
+	LD	DE, MSG_LOOP_OFF
+	CALL	PRTSTR
+	CALL	CRLF
+	JR	MAIN_LOOP_NODELAY
+MAIN_LOOP_MSG_TRACK:
+	CP	LOOP_TRACK
+	JR	NZ, MAIN_LOOP_MSG_PLAYLIST
+	LD	DE, MSG_LOOP_TRACK
+	CALL	PRTSTR
+	CALL	CRLF
+	JR	MAIN_LOOP_NODELAY
+MAIN_LOOP_MSG_PLAYLIST:
+	LD	DE, MSG_LOOP_PLAYLIST
+	CALL	PRTSTR
+	CALL	CRLF
+
+MAIN_LOOP_NODELAY:
+	CALL	WAITQ
+
+	; Check if stopped: handle loop/next logic
+	LD	A, (PLAY_STATE)
+	CP	PLAY_STOPPED
+	JP	NZ, MAIN_LOOP		; still playing/paused — iterate
+	; Track ended. Check loop mode.
+	LD	A, (LOOP_MODE)
+	CP	LOOP_TRACK
+	JR	Z, MAIN_RELOAD_TRACK	; loop current track
+	CP	LOOP_PLAYLIST
+	JR	NZ, MAIN_LOOP_END	; no loop — done
+	; Playlist loop: advance to next, wrap
+	LD	A, (TRACK_SELECTED)
+	INC	A
+	LD	HL, TRACK_COUNT
+	CP	(HL)
+	JR	C, MAIN_PLAYLIST_OK
+	XOR	A
+MAIN_PLAYLIST_OK:
+	LD	(TRACK_SELECTED), A
+	JP	MAIN_RELOAD_TRACK
+
+MAIN_LOOP_END:
+	JP	START_EXIT
+
+; Reload the track selected by TRACK_SELECTED from TRACK_LIST.
+; Rebuilds FCB_WORK from the track name, reinits engine, re-enters main loop.
+MAIN_RELOAD_TRACK:
+	; Compute pointer: HL = TRACK_LIST + TRACK_SELECTED * TRACK_NAME_LEN
+	LD	A, (TRACK_SELECTED)
+	LD	B, A
+	LD	HL, 0
+MAIN_RELOAD_MUL:
+	LD	A, B
+	OR	A
+	JR	Z, MAIN_RELOAD_MUL_DONE
+	DEC	B
+	LD	DE, TRACK_NAME_LEN
+	ADD	HL, DE
+	JR	MAIN_RELOAD_MUL
+MAIN_RELOAD_MUL_DONE:
+	LD	DE, TRACK_LIST
+	ADD	HL, DE			; HL = TRACK_LIST + selected * TRACK_NAME_LEN
+	; Copy track name to ARG_BUFFER
+	LD	DE, ARG_BUFFER
+	LD	B, TRACK_NAME_LEN
+MAIN_RELOAD_CPY:
+	LD	A, (HL)
+	LD	(DE), A
+	INC	HL
+	INC	DE
+	DJNZ	MAIN_RELOAD_CPY
+	; Rebuild FCB from ARG_BUFFER
+	CALL	BUILD_FCB_FROM_ARG
+	OR	A
+	JP	NZ, MAIN_LOOP_END	; bad name (shouldn't happen from scan)
+	; Reinitialize after load (engine needs valid MUSIC_BUF).
+	CALL	VALIDATE_FORMAT_STRUCTURE
+	OR	A
+	JP	NZ, MAIN_LOOP_END
+	CALL	LOAD_MUSIC_FILE
+	OR	A
+	JP	NZ, MAIN_LOOP_END
+	CALL	ENGINE_INIT
+	OR	A
+	JP	NZ, MAIN_LOOP_END
+	CALL	UPDATE_AUDIO_MODE_FROM_MUSIC
+	JP	MAIN_LOOP
+
+; Determine runtime audio routing from loaded music content.
+; PT3: enable TurboSound routing when a second embedded PT3 header exists.
+; Other formats: force single-chip AY mode.
+UPDATE_AUDIO_MODE_FROM_MUSIC:
+	XOR	A
+	LD	(AUDIO_OUT_MODE), A	; default single-chip AY
+	LD	A, (FILE_ENGINE)
+	CP	ENGINE_PTX
+	RET	NZ
+	CALL	PTX_DETECT_TURBOSOUND
+	OR	A
+	RET	Z
+	LD	A, AUDIO_OUT_TURBOSOUND
+	LD	(AUDIO_OUT_MODE), A
+	RET
+
+; Print detected hardware configuration.
+PRINT_HARDWARE_CONFIG:
+	LD	HL, (HW_CONFIG_DESC)
+	LD	DE, HW_DESC_UNKNOWN
+	LD	A, H
+	OR	L
+	JR	NZ, PRINT_HW_CONFIG_HAS_DESC
+	EX	DE, HL
+PRINT_HW_CONFIG_HAS_DESC:
+	EX	DE, HL
+	CALL	PRTSTR
+	CALL	CRLF
+	RET
+
+PRINT_AUDIO_MODE_STATUS:
+	LD	A, (AUDIO_OUT_MODE)
+	CP	AUDIO_OUT_TURBOSOUND
+	JR	Z, PRINT_AUDIO_MODE_TS
+	LD	DE, MSG_AUDIO_MODE_AY
+	CALL	PRTSTR
+	CALL	CRLF
+	RET
+
+PRINT_AUDIO_MODE_TS:
+	LD	DE, MSG_AUDIO_MODE_TS
+	CALL	PRTSTR
+	CALL	CRLF
+	RET
+
+; Detect dual-PT3 payload by scanning for a second "ProTracker " header
+; beyond file offset 0. Returns A=1 when found, else A=0.
+PTX_DETECT_TURBOSOUND:
+	LD	HL, MUSIC_BUF + 1
+	LD	DE, (MUSIC_SIZE)
+	LD	A, D
+	OR	A
+	JR	NZ, PTX_TS_HAVE_SIZE
+	LD	A, E
+	CP	12
+	JR	C, PTX_TS_NOT_FOUND
+PTX_TS_HAVE_SIZE:
+	EX	DE, HL			; HL = file size in bytes
+	OR	A			; clear carry for SBC
+	LD	DE, 11
+	SBC	HL, DE			; HL = number of candidate starts (offsets 1..size-11)
+	LD	B, H
+	LD	C, L
+	LD	HL, MUSIC_BUF + 1
+
+PTX_TS_SCAN_LOOP:
+	LD	A, B
+	OR	C
+	JR	Z, PTX_TS_NOT_FOUND
+
+PTX_TS_TRY:
+	LD	A, (HL)
+	CP	'P'
+	JR	NZ, PTX_TS_NEXT
+	INC	HL
+	LD	A, (HL)
+	CP	'r'
+	JR	NZ, PTX_TS_REWIND1
+	INC	HL
+	LD	A, (HL)
+	CP	'o'
+	JR	NZ, PTX_TS_REWIND2
+	INC	HL
+	LD	A, (HL)
+	CP	'T'
+	JR	NZ, PTX_TS_REWIND3
+	INC	HL
+	LD	A, (HL)
+	CP	'r'
+	JR	NZ, PTX_TS_REWIND4
+	INC	HL
+	LD	A, (HL)
+	CP	'a'
+	JR	NZ, PTX_TS_REWIND5
+	INC	HL
+	LD	A, (HL)
+	CP	'c'
+	JR	NZ, PTX_TS_REWIND6
+	INC	HL
+	LD	A, (HL)
+	CP	'k'
+	JR	NZ, PTX_TS_REWIND7
+	INC	HL
+	LD	A, (HL)
+	CP	'e'
+	JR	NZ, PTX_TS_REWIND8
+	INC	HL
+	LD	A, (HL)
+	CP	'r'
+	JR	NZ, PTX_TS_REWIND9
+	INC	HL
+	LD	A, (HL)
+	CP	' '
+	JR	NZ, PTX_TS_REWIND10
+	LD	A, 1
+	RET
+
+PTX_TS_REWIND10:
+	DEC	HL
+PTX_TS_REWIND9:
+	DEC	HL
+PTX_TS_REWIND8:
+	DEC	HL
+PTX_TS_REWIND7:
+	DEC	HL
+PTX_TS_REWIND6:
+	DEC	HL
+PTX_TS_REWIND5:
+	DEC	HL
+PTX_TS_REWIND4:
+	DEC	HL
+PTX_TS_REWIND3:
+	DEC	HL
+PTX_TS_REWIND2:
+	DEC	HL
+PTX_TS_REWIND1:
+	DEC	HL
+
+PTX_TS_NEXT:
+	INC	HL
+	DEC	BC
+	JR	PTX_TS_SCAN_LOOP
+
+PTX_TS_NOT_FOUND:
+	XOR	A
+	RET
+
+; Milestone 9: Hardware detection and configuration
+; This routine detects or configures the PSG hardware ports based on:
+; 1. CLI override flags (-msx, -rc, -eb, -coleco)
+; 2. HBIOS platform detection (if available)
+; 3. Probing fallback (write/read register 2 test)
+; 4. Defaults (MSX standard as safe fallback)
+;
+; Stores port configuration in PSG_REG_PORT, PSG_DATA_PORT, PSG2_REG_PORT, PSG2_DATA_PORT.
+; Stores description pointer in HW_CONFIG_DESC.
+; Returns A=0 on success, A!=0 on failure.
+;
+DETECT_HARDWARE_CONFIG:
+	CALL	CHECK_HW_CLI_FLAGS
+	OR	A
+	JR	NZ, DETECT_HW_TRY_HBIOS
+	LD	A, 1
+	LD	(PSG_HW_VALID), A
+	XOR	A
+	RET
+
+DETECT_HW_TRY_HBIOS:
+
+	CALL	DETECT_HBIOS_PLATFORM
+	OR	A
+	JR	NZ, DETECT_HW_TRY_PROBE
+	JR	DETECT_HW_OK
+
+DETECT_HW_TRY_PROBE:
+
+	CALL	PROBE_HARDWARE_CONFIG
+	OR	A
+	JR	NZ, DETECT_HW_FALLBACK
+	JR	DETECT_HW_OK
+
+DETECT_HW_OK:
+	LD	A, 1
+	LD	(PSG_HW_VALID), A
+	XOR	A
+	RET
+
+DETECT_HW_FALLBACK:
+
+	CALL	SET_CONFIG_MSX
+	XOR	A
+	LD	(PSG_HW_VALID), A
+	RET
+
+; Apply CLI port override (-msx, -rc, -coleco, -eb). Returns A=0 if applied, A!=0 if auto.
+CHECK_HW_CLI_FLAGS:
+	LD	A, (HW_DETECT_MODE)
+	OR	A
+	JR	Z, CHECK_HW_CLI_NONE
+	CP	HW_MODE_MSX
+	JR	Z, CHECK_HW_CLI_MSX
+	CP	HW_MODE_RC
+	JR	Z, CHECK_HW_CLI_RC
+	CP	HW_MODE_COLECO
+	JR	Z, CHECK_HW_CLI_COLECO
+	CP	HW_MODE_EB
+	JR	Z, CHECK_HW_CLI_EB
+CHECK_HW_CLI_NONE:
+	LD	A, 1
+	RET
+CHECK_HW_CLI_MSX:
+	CALL	SET_CONFIG_MSX
+	JR	CHECK_HW_CLI_DONE
+CHECK_HW_CLI_RC:
+	CALL	SET_CONFIG_RC
+	JR	CHECK_HW_CLI_DONE
+CHECK_HW_CLI_COLECO:
+	CALL	SET_CONFIG_COLECO
+	JR	CHECK_HW_CLI_DONE
+CHECK_HW_CLI_EB:
+	CALL	SET_CONFIG_EB_Z180
+CHECK_HW_CLI_DONE:
+	XOR	A
+	RET
+
+; Detect RomWBW HBIOS and query the primary AY device ports.
+; Returns A=0 on success, A!=0 on failure.
+DETECT_HBIOS_PLATFORM:
+	LD	HL, ($FFFC)		; HL := pointer to HBIOS ident
+	LD	A, 'W'
+	CP	(HL)
+	RET	NZ
+	INC	HL
+	LD	A, ~'W'
+	CP	(HL)
+	RET	NZ
+
+	LD	B, BF_SYSVER
+	LD	C, 0
+	RST	08			; L := platform id
+	LD	A, L
+	LD	(HBIOS_PLATFORM_ID), A
+
+	LD	BC, BC_SYSGET_SNDCNT
+	RST	08
+	LD	A, E
+	OR	A
+	RET	NZ			; No sound devices reported
+
+	XOR	A
+	LD	C, A			; Query sound unit 0
+	LD	B, BF_SNDQUERY
+	LD	E, BF_SNDQ_DEV
+	RST	08
+	OR	A
+	RET	NZ
+
+	; D=RSEL, E=RDAT from HBIOS query-dev
+	LD	A, D
+	LD	(PSG_REG_PORT), A
+	LD	A, E
+	LD	(PSG_DATA_PORT), A
+	LD	A, D
+	LD	(PSG2_REG_PORT), A
+	LD	A, E
+	LD	(PSG2_DATA_PORT), A
+	CALL	SET_HW_DESC_FROM_RSEL
+	LD	A, HW_MODE_AUTO
+	LD	(HW_DETECT_MODE), A
+	LD	A, 1
+	LD	(HBIOS_SOUND_OK), A
+	CALL	APPLY_Z180_FOR_PLATFORM
+	XOR	A
+	RET
+
+; Map HBIOS platform id to Z180 I/O base (tune.com CFGTBL Z180 column).
+APPLY_Z180_FOR_PLATFORM:
+	LD	A, (HBIOS_PLATFORM_ID)
+	LD	HL, HW_Z180_PLT_TBL
+APPLY_Z180_LOOP:
+	CP	(HL)
+	JR	Z, APPLY_Z180_FOUND
+	INC	HL
+	LD	A, (HL)
+	CP	$FF
+	JR	Z, APPLY_Z180_NONE
+	INC	HL
+	LD	A, (HBIOS_PLATFORM_ID)
+	JR	APPLY_Z180_LOOP
+APPLY_Z180_NONE:
+	LD	A, $FF
+	LD	(Z180_IO_BASE), A
+	RET
+APPLY_Z180_FOUND:
+	INC	HL
+	LD	A, (HL)
+	LD	(Z180_IO_BASE), A
+	RET
+
+; Map a known RSEL port to a human-readable hardware description.
+; Input: A=RSEL port. Preserves BC/DE/HL.
+SET_HW_DESC_FROM_RSEL:
+	PUSH	AF
+	CP	$A0
+	JR	Z, SET_HW_DESC_MSX
+	CP	$A1
+	JR	Z, SET_HW_DESC_MSX
+	CP	$D8
+	JR	Z, SET_HW_DESC_RC
+	CP	$68
+	JR	Z, SET_HW_DESC_Z180
+	CP	$51
+	JR	Z, SET_HW_DESC_COLECO
+	LD	HL, HW_DESC_HBIOS
+	JR	SET_HW_DESC_STORE
+SET_HW_DESC_MSX:
+	LD	HL, HW_DESC_MSX
+	JR	SET_HW_DESC_STORE
+SET_HW_DESC_RC:
+	LD	HL, HW_DESC_EB_RC
+	JR	SET_HW_DESC_STORE
+SET_HW_DESC_Z180:
+	LD	HL, HW_DESC_EB_Z180
+	JR	SET_HW_DESC_STORE
+SET_HW_DESC_COLECO:
+	LD	HL, HW_DESC_COLECO
+SET_HW_DESC_STORE:
+	LD	(HW_CONFIG_DESC), HL
+	POP	AF
+	RET
+
+; Probe hardware to determine PSG presence and configuration.
+; Tries common port triples and tests each with a Tune-compatible probe.
+; Returns A=0 on success (config set), A!=0 on failure.
+PROBE_HARDWARE_CONFIG:
+	; Z180 EB ($68/$60/$68) before RC/MSX to avoid false positives on SCZ180
+	LD	B, $68			; RSEL
+	LD	C, $60			; RDAT
+	LD	D, $68			; RIN
+	CALL	PROBE_AY_PORTS
+	OR	A
+	JR	Z, PROBE_HW_SET_Z180
+
+	LD	B, $A0			; MSX RSEL
+	LD	C, $A1			; RDAT
+	LD	D, $A2			; RIN
+	CALL	PROBE_AY_PORTS
+	OR	A
+	JR	Z, PROBE_HW_SET_MSX
+
+	LD	B, $D8			; RC/EB RSEL
+	LD	C, $D0			; RDAT
+	LD	D, $D8			; RIN
+	CALL	PROBE_AY_PORTS
+	OR	A
+	JR	Z, PROBE_HW_SET_RC
+
+	LD	B, $51			; Coleco RSEL
+	LD	C, $50			; RDAT
+	LD	D, $52			; RIN
+	CALL	PROBE_AY_PORTS
+	OR	A
+	JR	Z, PROBE_HW_SET_COLECO
+
+	LD	A, 1
+	RET
+
+PROBE_HW_SET_MSX:
+	CALL	SET_CONFIG_MSX
+	JR	PROBE_SUCCESS
+PROBE_HW_SET_RC:
+	CALL	SET_CONFIG_RC
+	JR	PROBE_SUCCESS
+PROBE_HW_SET_Z180:
+	CALL	SET_CONFIG_EB_Z180
+	JR	PROBE_SUCCESS
+PROBE_HW_SET_COLECO:
+	CALL	SET_CONFIG_COLECO
+	JR	PROBE_SUCCESS
+
+PROBE_SUCCESS:
+	XOR	A
+	RET
+
+; Undo probe side effects on port pair BC (RSEL, RDAT): mixer off, amps down.
+; Do not write tone period registers (0 = max pitch).
+; Input: B=RSEL, C=RDAT.
+PROBE_AY_QUIET:
+	PUSH	AF
+	PUSH	BC
+	PUSH	DE
+	LD	A, B
+	LD	E, A			; E = RSEL (preserve for slow-IO exit)
+	LD	A, C
+	LD	D, A			; D = RDAT
+	LD	A, E
+	CP	$68
+	JR	Z, PROBE_AY_QUIET_SLOW
+	CP	$D8
+	JR	Z, PROBE_AY_QUIET_SLOW
+	JR	PROBE_AY_QUIET_IO
+PROBE_AY_QUIET_SLOW:
+	CALL	PSG_IO_SLOW_ENTER
+PROBE_AY_QUIET_IO:
+	LD	B, 0
+	LD	C, E
+	LD	A, 7
+	OUT	(C), A
+	LD	C, D
+	LD	A, $3F
+	OUT	(C), A
+	LD	C, E
+	LD	A, 8
+	OUT	(C), A
+	LD	C, D
+	LD	A, $0F
+	OUT	(C), A
+	LD	C, E
+	LD	A, 9
+	OUT	(C), A
+	LD	C, D
+	LD	A, $0F
+	OUT	(C), A
+	LD	C, E
+	LD	A, 10
+	OUT	(C), A
+	LD	C, D
+	LD	A, $0F
+	OUT	(C), A
+	LD	A, E
+	CP	$68
+	JR	Z, PROBE_AY_QUIET_SLOWX
+	CP	$D8
+	JR	Z, PROBE_AY_QUIET_SLOWX
+	JR	PROBE_AY_QUIET_DONE
+PROBE_AY_QUIET_SLOWX:
+	CALL	PSG_IO_SLOW_EXIT
+PROBE_AY_QUIET_DONE:
+	POP	DE
+	POP	BC
+	POP	AF
+	RET
+
+; Tune-compatible AY probe (write $AA to R2, read back via RIN).
+; Input: B=RSEL, C=RDAT, D=RIN. Returns A=0 if present, A!=0 if not.
+PROBE_AY_PORTS:
+	PUSH	BC
+	DI
+	CALL	PSG_IO_SLOW_ENTER
+	PUSH	DE			; preserve RIN (D)
+	LD	A, B
+	LD	E, A			; E := RSEL
+	LD	A, C
+	LD	D, A			; D := RDAT
+	LD	B, 0
+	LD	C, E
+	LD	A, 2
+	OUT	(C), A
+	LD	C, D
+	LD	A, $AA
+	OUT	(C), A
+	LD	C, E
+	LD	A, 2
+	OUT	(C), A
+	POP	DE			; restore RIN in D
+	LD	C, D
+	IN	A, (C)
+	CP	$AA
+	LD	A, 1
+	JR	NZ, PROBE_AY_DONE
+	XOR	A
+PROBE_AY_DONE:
+	POP	BC
+	PUSH	BC
+	CALL	PROBE_AY_QUIET
+	POP	BC
+	CALL	PSG_IO_SLOW_EXIT
+	EI
+	RET
+
+; Legacy per-platform probe wrappers retained for reference callers.
+PROBE_PORTS_MSX:
+	LD	B, $A0
+	LD	C, $A1
+	LD	D, $A2
+	CALL	PROBE_AY_PORTS
+	RET	NZ
+	CALL	SET_CONFIG_MSX
+	XOR	A
+	RET
+
+PROBE_PORTS_RC:
+	LD	B, $D8
+	LD	C, $D0
+	LD	D, $D8
+	CALL	PROBE_AY_PORTS
+	RET	NZ
+	CALL	SET_CONFIG_RC
+	XOR	A
+	RET
+
+PROBE_PORTS_EB_Z180:
+	LD	B, $68
+	LD	C, $60
+	LD	D, $68
+	CALL	PROBE_AY_PORTS
+	RET	NZ
+	CALL	SET_CONFIG_EB_Z180
+	XOR	A
+	RET
+
+PROBE_PORTS_COLECO:
+	LD	B, $51
+	LD	C, $50
+	LD	D, $52
+	CALL	PROBE_AY_PORTS
+	RET	NZ
+	CALL	SET_CONFIG_COLECO
+	XOR	A
+	RET
+
+; Configuration setters: Each sets port registers and description pointer.
+
+SET_CONFIG_MSX:
+	LD	A, $A0
+	LD	(PSG_REG_PORT), A
+	LD	A, $A1
+	LD	(PSG_DATA_PORT), A
+	LD	A, $A2
+	LD	(PSG2_DATA_PORT), A
+	LD	A, $A3
+	LD	(PSG2_REG_PORT), A
+	LD	A, $FF
+	LD	(Z180_IO_BASE), A
+	LD	HL, HW_DESC_MSX
+	LD	(HW_CONFIG_DESC), HL
+	RET
+
+SET_CONFIG_RC:
+	LD	A, $D0
+	LD	(PSG_DATA_PORT), A
+	LD	A, $D8
+	LD	(PSG_REG_PORT), A
+	LD	A, $D0
+	LD	(PSG2_DATA_PORT), A
+	LD	A, $D8
+	LD	(PSG2_REG_PORT), A
+	LD	HL, HW_DESC_EB_RC
+	LD	(HW_CONFIG_DESC), HL
+	RET
+
+SET_CONFIG_EB_Z180:
+	LD	A, $60
+	LD	(PSG_DATA_PORT), A
+	LD	A, $68
+	LD	(PSG_REG_PORT), A
+	LD	A, $60
+	LD	(PSG2_DATA_PORT), A
+	LD	A, $68
+	LD	(PSG2_REG_PORT), A
+	LD	A, $C0
+	LD	(Z180_IO_BASE), A
+	LD	HL, HW_DESC_EB_Z180
+	LD	(HW_CONFIG_DESC), HL
+	RET
+
+SET_CONFIG_COLECO:
+	LD	A, $50
+	LD	(PSG_DATA_PORT), A
+	LD	A, $51
+	LD	(PSG_REG_PORT), A
+	LD	A, $50
+	LD	(PSG2_DATA_PORT), A
+	LD	A, $51
+	LD	(PSG2_REG_PORT), A
+	LD	HL, HW_DESC_COLECO
+	LD	(HW_CONFIG_DESC), HL
+	RET
+
+; Milestone 5: Load tune from FCB_WORK into MUSIC_BUF.
+; FCB_WORK must already be built (BUILD_FCB_FROM_ARG called in validation).
+; Reopens the file, reads 128-byte DMA blocks into MUSIC_BUF sequentially,
+; stops at EOF (BDOS 14h returns non-zero) or HEAPENDB page limit.
+; Stores actual loaded size (blocks * 128) in MUSIC_SIZE.
+; On success: A=0, PLAY_STATE=PLAY_PLAYING.
+; On open error: A=ERR_FILE_NOT_FOUND.
+; On oversize: A=ERR_FILE_READ (tune exceeds heap up to HEAPENDB).
+; Register use: IX=write pointer.
+LOAD_MUSIC_FILE:
+	; Reset FCB current-record fields before reopening
+	XOR	A
+	LD	(FCB_WORK+12), A	; EX = extent 0
+	LD	(FCB_WORK+32), A	; CR = current record 0
+	; Open file
+	LD	DE, FCB_WORK
+	LD	C, $0F
+	CALL	BDOS
+	CP	$FF
+	JR	Z, LOAD_MF_NOT_FOUND
+	; Setup IX = write pointer at MDLADDR
+	LD	IX, MUSIC_BUF
+
+LOAD_MF_BLOCK:
+	PUSH	IX
+	POP	HL
+	LD	DE, 128
+	ADD	HL, DE
+	LD	A, (HEAPENDB)
+	CP	H
+	JP	Z, LOAD_MF_OVERSIZE
+	; Set DMA to IX (current write pointer)
+	PUSH	IX
+	POP	DE
+	LD	C, $1A
+	CALL	BDOS
+	; Read one 128-byte sequential block
+	LD	DE, FCB_WORK
+	LD	C, $14
+	CALL	BDOS
+	OR	A
+	JR	NZ, LOAD_MF_EOF	; non-zero = EOF or error
+	; Advance IX by 128
+	LD	DE, 128
+	ADD	IX, DE
+	JR	LOAD_MF_BLOCK
+
+LOAD_MF_EOF:
+	; Close file
+	LD	DE, FCB_WORK
+	LD	C, $10
+	CALL	BDOS
+	; Restore default DMA before any further BDOS/console I/O (ZPM3/CP/M+).
+	LD	DE, $0080
+	LD	C, $1A
+	CALL	BDOS
+	; MUSIC_SIZE = IX - MUSIC_BUF (= blocks_read * 128)
+	PUSH	IX
+	POP	DE			; DE = current write pointer (next free block)
+	LD	HL, MUSIC_BUF
+	LD	A, E
+	SUB	L
+	LD	L, A
+	LD	A, D
+	SBC	A, H
+	LD	H, A			; HL = size in bytes (rounded to 128)
+	LD	(MUSIC_SIZE), HL
+	LD	A, H
+	OR	L
+	JR	NZ, LOAD_MF_OK
+	LD	A, ERR_FILE_READ
+	RET
+LOAD_MF_OK:
+	XOR	A
+	RET
+
+LOAD_MF_NOT_FOUND:
+	LD	A, ERR_FILE_NOT_FOUND
+	RET
+
+LOAD_MF_OVERSIZE:
+	LD	DE, FCB_WORK
+	LD	C, $10
+	CALL	BDOS
+	LD	DE, $0080
+	LD	C, $1A
+	CALL	BDOS
+	LD	A, ERR_FILE_READ
+	RET
+
+; Convert ARG_BUFFER to a CP/M FCB at FCB_WORK.
+; Supports optional drive prefix (A:FILE.PT3) and 8.3 filename.
+; Returns A = ERR_OK or ERR_INVALID_FILENAME.
+BUILD_FCB_FROM_ARG:
+	LD	HL, FCB_WORK
+	LD	B, 36
+
+BUILD_FCB_CLEAR:
+	XOR	A
+	LD	(HL), A
+	INC	HL
+	DJNZ	BUILD_FCB_CLEAR
+
+	LD	HL, FCB_WORK+1
+	LD	B, 11
+
+BUILD_FCB_FILL_SPACES:
+	LD	(HL), ' '
+	INC	HL
+	DJNZ	BUILD_FCB_FILL_SPACES
+
+	LD	HL, ARG_BUFFER
+	LD	A, (HL)
+	OR	A
+	JP	Z, BUILD_FCB_INVALID
+	CALL	TO_UPPER
+	CP	'A'
+	JR	C, BUILD_FCB_NAME_START
+	CP	'Z'+1
+	JR	NC, BUILD_FCB_NAME_START
+	INC	HL
+	LD	A, (HL)
+	CP	':'
+	JR	NZ, BUILD_FCB_NAME_REWIND
+	DEC	HL
+	LD	A, (HL)
+	CALL	TO_UPPER
+	SUB	'A'-1
+	LD	(FCB_WORK), A
+	INC	HL
+	INC	HL
+	JR	BUILD_FCB_NAME_START
+
+BUILD_FCB_NAME_REWIND:
+	DEC	HL
+
+BUILD_FCB_NAME_START:
+	LD	DE, FCB_WORK+1
+	LD	B, 0
+
+BUILD_FCB_NAME_LOOP:
+	LD	A, (HL)
+	OR	A
+	JR	Z, BUILD_FCB_NAME_DONE
+	CP	'.'
+	JR	Z, BUILD_FCB_EXT_START
+	CP	92
+	JR	Z, BUILD_FCB_INVALID
+	CP	'/'
+	JR	Z, BUILD_FCB_INVALID
+	CP	':'
+	JR	Z, BUILD_FCB_INVALID
+	CP	'"'
+	JR	Z, BUILD_FCB_INVALID
+	LD	A, B
+	CP	8
+	JR	NC, BUILD_FCB_INVALID
+	LD	A, (HL)
+	CALL	TO_UPPER
+	LD	(DE), A
+	INC	DE
+	INC	HL
+	INC	B
+	JR	BUILD_FCB_NAME_LOOP
+
+BUILD_FCB_NAME_DONE:
+	LD	A, B
+	OR	A
+	JR	Z, BUILD_FCB_INVALID
+	XOR	A
+	RET
+
+BUILD_FCB_EXT_START:
+	LD	A, B
+	OR	A
+	JR	Z, BUILD_FCB_INVALID
+	INC	HL
+	LD	DE, FCB_WORK+9
+	LD	B, 0
+
+BUILD_FCB_EXT_LOOP:
+	LD	A, (HL)
+	OR	A
+	JR	Z, BUILD_FCB_EXT_DONE
+	CP	'.'
+	JR	Z, BUILD_FCB_INVALID
+	CP	92
+	JR	Z, BUILD_FCB_INVALID
+	CP	'/'
+	JR	Z, BUILD_FCB_INVALID
+	CP	':'
+	JR	Z, BUILD_FCB_INVALID
+	CP	'"'
+	JR	Z, BUILD_FCB_INVALID
+	LD	A, B
+	CP	3
+	JR	NC, BUILD_FCB_INVALID
+	LD	A, (HL)
+	CALL	TO_UPPER
+	LD	(DE), A
+	INC	DE
+	INC	HL
+	INC	B
+	JR	BUILD_FCB_EXT_LOOP
+
+BUILD_FCB_EXT_DONE:
+	LD	A, B
+	OR	A
+	JR	Z, BUILD_FCB_INVALID
+	XOR	A
+	RET
+
+BUILD_FCB_INVALID:
+	LD	A, ERR_INVALID_FILENAME
+	RET
+
+TO_UPPER:
+	CP	'a'
+	RET	C
+	CP	'z' + 1
+	RET	NC
+	SUB	32
+	RET
+
+; Print the zero-terminated string addressed by DE.
+PRTSTR:
+	PUSH	AF
+	PUSH	DE
+
+PRTSTR_LOOP:
+	LD	A, (DE)
+	OR	A
+	JR	Z, PRTSTR_DONE
+	CALL	PRTCHR
+	INC	DE
+	JR	PRTSTR_LOOP
+
+PRTSTR_DONE:
+	POP	DE
+	POP	AF
+	RET
+
+; Print the character in A via CP/M BDOS function 2.
+PRTCHR:
+	PUSH	BC
+	PUSH	DE
+	PUSH	HL
+	LD	E, A
+	LD	C, $02
+	CALL	BDOS
+	POP	HL
+	POP	DE
+	POP	BC
+	RET
+
+; Print A as two uppercase hexadecimal digits.
+PRINT_HEX_BYTE:
+	PUSH	AF
+	RRCA
+	RRCA
+	RRCA
+	RRCA
+	AND	$0F
+	CALL	PRINT_HEX_NIBBLE
+	POP	AF
+	AND	$0F
+	CALL	PRINT_HEX_NIBBLE
+	RET
+
+PRINT_HEX_NIBBLE:
+	CP	10
+	JR	C, PRINT_HEX_DIGIT
+	ADD	A, 'A' - 10
+	JP	PRTCHR
+
+PRINT_HEX_DIGIT:
+	ADD	A, '0'
+	JP	PRTCHR
+
+CRLF:
+	PUSH	AF
+	LD	A, 13
+	CALL	PRTCHR
+	LD	A, 10
+	CALL	PRTCHR
+	POP	AF
+	RET
+
+MSG_BANNER:
+	.DB	"VibeTune Player for RomWBW v", VT_VERSION, ", ", VT_BUILD_DATE
+	.DB	" (", VT_COM_SIZE, ")", 0
+; Config file FCB name field: "VTUNE   " + "CFG" (exactly 11 bytes, space-padded)
+MSG_CFG_NAME:
+	.DB	"VTUNE   CFG"
+MSG_INPUT:
+	.DB	"Input file: ", 0
+MSG_CLASS_PTX:
+	.DB	"Classification: PTx (.pt2/.pt3)", 0
+MSG_CLASS_MYM:
+	.DB	"Classification: MYM (.mym)", 0
+MSG_MYM_HINT_PREFIX:
+	.DB	"MYM frame hint: 0x", 0
+MSG_PTX_VARIANT_VORTEX:
+	.DB	"PTX variant: Vortex Tracker family", 0
+MSG_PTX_VARIANT_PROTRACKER:
+	.DB	"PTX variant: ProTracker family", 0
+MSG_ENGINE_INIT_OK:
+	.DB	"Engine init: ready.", 0
+MSG_AUDIO_MODE_AY:
+	.DB	"Audio mode: AY (single-chip)", 0
+MSG_AUDIO_MODE_TS:
+	.DB	"Audio mode: TurboSound (auto-detected)", 0
+MSG_PLAYING:
+	.DB	"Playing... (Esc=quit)", 0
+MSG_STATE_PLAYING:
+	.DB	"State: Playing", 0
+MSG_STATE_PAUSED:
+	.DB	"State: Paused", 0
+MSG_LOOP_OFF:
+	.DB	"Loop mode: Off", 0
+MSG_LOOP_TRACK:
+	.DB	"Loop mode: Track", 0
+MSG_LOOP_PLAYLIST:
+	.DB	"Loop mode: Playlist", 0
+MSG_SCANNING:
+	.DB	"Scanning directory...", 0
+MSG_TRACKS_FOUND:
+	.DB	"Tracks found: ", 0
+MSG_USAGE:
+	.DB	"Usage: VTUNE [-debug] [-delay] [-msx|-rc|-coleco|-eb] file[.pt3|.pt2|.mym] | -list", 0
+MSG_SWITCH_LIST:
+	.DB	"-list", 0
+MSG_SWITCH_MSX:
+	.DB	"-msx", 0
+MSG_SWITCH_RC:
+	.DB	"-rc", 0
+MSG_SWITCH_COLECO:
+	.DB	"-coleco", 0
+MSG_SWITCH_EB:
+	.DB	"-eb", 0
+MSG_SWITCH_DELAY:
+	.DB	"-delay", 0
+MSG_SWITCH_DEBUG:
+	.DB	"-debug", 0
+MSG_DEBUG_ON:
+	.DB	"Debug: row trace on (one line per pattern row)", 0
+MSG_DBG_PREFIX:
+	.DB	"dbg P=", 0
+MSG_DBG_A:
+	.DB	" A=", 0
+MSG_DBG_B:
+	.DB	" B=", 0
+MSG_DBG_C:
+	.DB	" C=", 0
+MSG_DBG_N:
+	.DB	" n=", 0
+MSG_DBG_F:
+	.DB	" f=", 0
+MSG_DBG_S:
+	.DB	" st=", 0
+MSG_ERR_NO_ARG:
+	.DB	"Error: missing file argument.", 0
+MSG_ERR_TOO_MANY:
+	.DB	"Error: multiple arguments are not supported.", 0
+MSG_ERR_UNSUPPORTED:
+	.DB	"Error: unsupported extension (supported: .pt2, .pt3, .mym).", 0
+MSG_ERR_INVALID_FILENAME:
+	.DB	"Error: invalid CP/M filename (use 8.3 format).", 0
+MSG_ERR_FILE_NOT_FOUND:
+	.DB	"Error: file not found.", 0
+MSG_ERR_FILE_READ:
+	.DB	"Error: unable to read input file.", 0
+MSG_ERR_INVALID_DATA:
+	.DB	"Error: invalid tune structure for selected format.", 0
+MSG_ERR_ENGINE_INIT:
+	.DB	"Error: engine initialization failed.", 0
+
+; Milestone 9: Hardware configuration strings and descriptions
+HW_DESC_UNKNOWN:
+	.DB	"Hardware: Unknown (using default)", 0
+HW_DESC_HBIOS:
+	.DB	"Hardware: HBIOS-reported AY ports", 0
+HW_DESC_MSX:
+	.DB	"Hardware: MSX standard ($A0/$A1)", 0
+HW_DESC_RC:
+	.DB	"Hardware: RC2014 standard ($D8/$D0)", 0
+HW_DESC_EB_RC:
+	.DB	"Hardware: RC2014 EB module ($D8/$D0)", 0
+HW_DESC_EB_Z180:
+	.DB	"Hardware: RCZ180 EB module ($68/$60)", 0
+MSG_TIMING_DLY:
+	.DB	"Timing: delay mode", 0
+MSG_TIMING_TIM:
+	.DB	"Timing: timer mode", 0
+HW_DESC_COLECO:
+	.DB	"Hardware: Coleco ports ($50/$51)", 0
+
+;===============================================================================
+; Initialized data (EMITTED into the .COM image; no .DS here).
+;
+; CRITICAL: keep this block free of .DS reservations. TASM omits .DS gaps from
+; the .com output, which would shift every following byte's load address and
+; break absolute references. All scratch/uninitialized storage lives in the
+; heap below (after HEAP), which is not emitted and is zeroed at runtime.
+;===============================================================================
+HEAPENDB:
+	.DB	HEAPEND >> 8		; runtime ceiling page (updated at startup)
+FILE_ENGINE:
+	.DB	ENGINE_NONE
+PTX_VARIANT:
+	.DB	PTX_VARIANT_UNKNOWN
+MYM_FRAME_HINT:
+	.DB	0
+ENGINE_READY:
+	.DB	0
+DISP_MODE:
+	.DB	DISP_PLAIN
+AUDIO_OUT_MODE:
+	.DB	AUDIO_OUT_AY
+PSG_REG_PORT:
+	.DB	PSG_REG_PORT_DEFAULT
+PSG_DATA_PORT:
+	.DB	PSG_DATA_PORT_DEFAULT
+PSG2_REG_PORT:
+	.DB	PSG2_REG_PORT_DEFAULT
+PSG2_DATA_PORT:
+	.DB	PSG2_DATA_PORT_DEFAULT
+PSG_TEMP_VAL:
+	.DB	0
+PSG_IO_DCSAV:
+	.DB	0
+Z180_IO_BASE:
+	.DB	$FF
+HW_Z180_PLT_TBL:
+	.DB	$08, $C0
+	.DB	$0A, $C0
+	.DB	$FF
+HW_DETECT_MODE:
+	.DB	HW_MODE_AUTO
+HBIOS_PLATFORM_ID:
+	.DB	0
+HBIOS_SOUND_OK:
+	.DB	0
+PSG_TOUCHED:
+	.DB	0
+PSG_HW_VALID:
+	.DB	0
+QDLY:
+	.DW	0
+WMOD:
+	.DB	0
+DELAYMD:
+	.DB	0
+HW_CONFIG_DESC:
+	.DW	HW_DESC_UNKNOWN
+RUN_MODE:
+	.DB	RUNMODE_PLAY
+TRACK_COUNT:
+	.DB	0
+TRACK_SELECTED:
+	.DB	0
+DEBUG_FLAG:
+	.DB	0
+ARG_HAVE:
+	.DB	0
+PLAY_STATE:
+	.DB	PLAY_STOPPED
+LOOP_MODE:
+	.DB	LOOP_NONE
+MUSIC_SIZE:
+	.DW	0
+PTX_STATE_POS:
+	.DW	0
+MYM_STATE_PTR:
+	.DW	MUSIC_BUF
+HBIOSMD:
+	.DB	0
+
+;===============================================================================
+; PTx/MYM shared heap (tune.com model). Pure .DS storage: NOT emitted into the
+; .COM image (file ends at HEAP). Zeroed at runtime by HEAP_CLEAR before load.
+;===============================================================================
+HEAP	.EQU	$
+
+	.ORG	HEAP
+
+PSG_MUTE_REGS:
+	.DS	14
+SCAN_EXT_BUF:
+	.DS	3
+SCAN_NAME_BUF:
+	.DS	14
+SCAN_FCB:
+	.DS	36
+CFG_FCB:
+	.DS	36
+ARG_SCRATCH:
+	.DS	16
+ARG_BUFFER:
+	.DS	128
+FCB_WORK:
+	.DS	36
+DMA_BUFFER:
+	.DS	128
+TRACK_LIST:
+	.DS	MAX_TRACKS * TRACK_NAME_LEN
+BULBA_PORTS:
+	.DS	2
+VARS:
+ChanA	.DS	29
+ChanB	.DS	29
+ChanC	.DS	29
+DelyCnt	.DS	1
+CurESld	.DS	2
+CurEDel	.DS	1
+Ns_Base	.DS	1
+AddToNs	.DS	1
+AYREGS:
+VT_	.DS	256
+NT_	.DS	192
+
+; Bulba internal equates (must follow VARS labels above)
+T1_		.EQU	VT_ + 16
+T_OLD_1		.EQU	T1_
+T_OLD_2		.EQU	T_OLD_1 + 24
+T_OLD_3		.EQU	T_OLD_2 + 24
+T_OLD_0		.EQU	T_OLD_3 + 2
+T_NEW_0		.EQU	T_OLD_0
+T_NEW_1		.EQU	T_OLD_1
+T_NEW_2		.EQU	T_NEW_0 + 24
+T_NEW_3		.EQU	T_OLD_3
+PT2EMPTYORN	.EQU	VT_ + 31
+VAR0END		.EQU	VT_ + 16
+EnvBase		.EQU	VT_ + 14
+Ampl		.EQU	AYREGS + AmplC
+Ns_Base_AddToNs	.EQU	Ns_Base
+
+MUSIC_BUF:
+
+	.END	START
