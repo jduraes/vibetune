@@ -1,72 +1,78 @@
-04-Jun-2026 — Build under test: **v0.0.73**
+# VibeTune Handover
 
-# VibeTune Handover (v0.0.73)
+**Build under test: v0.0.87 (05-Jun-2026)** — *first working player.*
 
-Short summary
+## State
 
-- **Build:** v0.0.73 (04-Jun-2026). **Fix:** `PT3_BIND_PATTERN` stack leak (leftover `PUSH AF` → instant return to CCP). v0.0.72: prompt return + exit whine after classification. **Retest `rl2wof` on SC126.**
-- **Hardware:** RCZ180 EB module ($68/$60).
+- **WORKS on real hardware.** On SC126 / RCZ180 EB (RomWBW HBIOS, ZPM3, drive F
+  user 3, AY ports **$68/$60**), `vtune rl2wof` and `vtune rl2wofts` load, report
+  `Timing: timer mode`, and **play audibly**, comparable to `tune.com`.
+- Banner + usage print correctly on bare `vtune`.
+- Build: `Build.cmd` → TASM `-t80 -g3 -fFF -dWBW` → `vtune.com`, then copies to
+  `..\RomWBW\Binary\Apps\vtune.com`. Transfer to target via ZMODEM (`zmd r`).
+- Version string lives in `vtversion.inc`; banner size tag is `(flat)` to mark
+  the flat-image layout (see below).
 
-What changed in v0.0.65–0.0.67
+## Engine
 
-- PSG path aligned with `tune.com` (ROUT bulk write, Z180 slow I/O $C0, ROUT-only mute).
-- Deferred AY detect until after successful parse (fixes usage-only pops).
-- Exit mute only when `PSG_TOUCHED` (playback actually used the chip).
+- Uses the **S.V. Bulba PT2/PT3 player** extracted from RomWBW `tune.asm`:
+  `pt3bulba.inc` (player) + `pt3bulba_shim.inc` (host glue). Init = `CALL
+  BULBA_START`; per-tick = `CALL BULBA_START+5`.
+- The **clean-room engine was abandoned** and archived under
+  `archive/cleanroom/` with `archive/cleanroom/POSTMORTEM.md`. Do not reintroduce
+  it into the build.
 
-Immediate testing checklist (what to run and what to report)
+## The three fixes that made it work (do not regress)
 
-- Build (if you want to rebuild locally):
+1. **Flat `.COM` image.** TASM omits `.DS` reserved gaps from the `.com` output;
+   any `.DS` *between* code/data shifts every following byte's load address and
+   silently crashes startup (no banner). Fix: **no `.DS` in the emitted region.**
+   Initialized data (`.DB`/`.DW`) is one contiguous block; then `HEAP .EQU $`;
+   then all `.DS` scratch + `VARS` + `MUSIC_BUF`. File ends exactly at `HEAP`,
+   like `tune.com`. The shim's `OCTAVEADJ`/`TMP` are `.DB 0` (emitted), not `.DS`.
+2. **`HEAP_CLEAR` starts at `VARS`, not `HEAP`.** The parse buffers (`FCB_WORK`,
+   `ARG_BUFFER`, …) and `BULBA_PORTS` live below `VARS` and are populated during
+   startup; zeroing the whole heap wiped the parsed filename → "unable to read
+   input file". Clearing from `VARS` preserves them.
+3. **`PROBETIMER` timer test fixed** (`timing.inc`). Was `RET NZ` (inverted),
+   which chose delay mode exactly when the HBIOS timer was live. Now `RET Z`:
+   nonzero tick count ⇒ timer mode, matching `tune.com`.
 
-```powershell
-.\Build.cmd
-```
+## Hardware / ports / timing policy
 
-- Run the structural validation harness:
+- Ports come from **RomWBW HBIOS detection** + CLI overrides, not hardcoded EB.
+  `DETECT_HARDWARE_CONFIG`: CLI flag → HBIOS `BF_SNDQUERY` → probe → MSX default.
+  `BULBA_SYNC_PORTS` copies `PSG_REG_PORT`/`PSG_DATA_PORT` into `BULBA_PORTS`.
+- CLI flags: `-msx -rc -coleco -eb -delay -debug -list`.
+- Timing: `timing.inc` `PROBETIMER`/`WAITQ`; `-delay` forces the calibrated
+  delay loop, otherwise timer mode when a live HBIOS timer is present.
 
-```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\Validate-StructureChecks.ps1
-```
+## Audio policy (keep)
 
-- Run VibeTune on the target (RomWBW / SIMH / hardware). At the CP/M prompt run:
+- Mixer-only pause (`reg 7 = $3F`) — no pause pops.
+- Exit mute via ROUT only when `PSG_TOUCHED`. Never write tone period 0 to mute
+  (causes whine). Do not retry "quiet exit without full ROUT".
 
-```
-vtune.com rl2wof
-vtune.com rl2wofts
-```
+## Open / next
 
-Record these observations for each tune:
+- [ ] Triage the "many other problems" the user mentioned beyond core playback.
+- [ ] Pause/loop state lines (`State: Paused/Playing`, `Loop mode: …`) currently
+      echo to console on keypress — review UX vs `tune.com` (which has no pause).
+- [ ] Verify TurboSound path (`rl2wofts` reports `Audio mode: TurboSound`).
+- [ ] Consolidate older docs (`Handoff-2026-05-3x.md`, design specs) if desired.
 
-- **Audible music:** Yes / No
-- **Pops on start/stop:** None / Few / Many
-- **App behavior:** Stays until Esc? Quiet on exit? Any error text?
-- **Engine banner lines:** Copy the startup lines that show `Classification`, `Engine init`, and `Audio mode`.
+## Key files
 
--If music is still absent
+| File | Role |
+|------|------|
+| `vibetune.asm` | Main app: startup, HW detect, CLI parse, load, main loop, data+heap |
+| `pt3bulba.inc` / `pt3bulba_shim.inc` | Bulba player + host glue |
+| `timing.inc` | `WAITQ`, `PROBETIMER` (timer vs delay), `QDLY` |
+| `vtversion.inc` | Version / build date / size tag |
+| `Build.cmd`, `Clean.cmd`, `Makefile` | Build / clean |
+| `scripts/Extract-BulbaPlayer.ps1` | Regenerates `pt3bulba.inc` from `tune.asm` |
+| `Run-SIMH-VibeTune*.cmd`, `Sync-SIMH-Content.ps1` | SIMH harness (decode only; no AY audio) |
+| `Validate-StructureChecks.ps1` | Structural validation of corpus / invalid vectors |
+| `archive/cleanroom/` | Abandoned clean-room engine + `POSTMORTEM.md` |
 
-- For audio verification: run `vtune.com` on real hardware (RCZ180 or equivalent) and capture a short video or serial log of the CP/M session showing `vtune.com` startup and the observations — SIMH does not emulate AY audio and cannot provide trustworthy sound output.
-- For decoding/logging only: you may still run under SIMH (`Run-SIMH-VibeTune.cmd`) to capture a CP/M transcript and `vtune.lst` (assembly listing / runtime logs); attach those when reporting to help with decode trace and timing analysis.
-- Next code actions (on my side): enable a small PT3-decode trace output (tick-level) and a guarded AY-register dump to help locate whether notes are being scheduled or suppressed.
-
-Next engineer steps
-
-- **Validated 01-Jun v0.0.67 (RCZ180):** `vtune.com` — silent. `vtune.com rl2wof` — no whine; pops on play/pause/exit; stays in loop until Esc; no audible tune yet.
-- Priority A: PT3 decode port (Bulba/tune.com parity) for audible `rl2wof`.
-- **Done (v0.0.68):** Mixer-only pause — user confirms no pause/resume pops.
-- **Do not retry** quiet exit without full ROUT — v0.0.69 failed on hardware (whine after exit).
-- Priority C: Triage remaining envelope/special-command decode cases that can silence channels.
-
-Relevant files to attach when reporting
-
-- `vtune.com` (build artifact)
-- `vtune.lst` (assembly listing in build output)
-- Captured CP/M transcript / SIMH log
-- `TunesValidationLedger.md` entries around v0.0.59–v0.0.60
-
-Contacts and context
-
-- I'm tracking progress in the repo (commit messages + `TunesValidationLedger.md`). If you'd like, I can:
-	- run the trace-build and attach results, or
-	- instrument a lightweight in-app debug flag that prints PT3 decode events to the console while the tune runs.
-
----
-Updated: 01-Jun-2026 — concise handover for v0.0.60
+Reference (working): `..\RomWBW\Source\Apps\Tune\tune.asm`.
