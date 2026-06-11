@@ -1,6 +1,6 @@
 # VibeTune Handover
 
-**Build under test: v0.0.114 (11-Jun-2026)** — *startup pop fixes validated on SC126 and RC2014; debug instrumentation removed.*
+**Build under test: v0.0.125 (11-Jun-2026)** — *startup pop fixes validated; `-list` scans and starts playlist playback; Vortex PT3 files now play through Bulba.*
 
 ## Goal
 
@@ -9,6 +9,8 @@ RomWBW CP/M player (`vtune.com`) for PT2/PT3/MYM on real hardware (SC126 / RCZ18
 ## State
 
 - **Play path works** on target: `vtune rl2wof` / `vtune rl2wofts` load, **timer mode**, play audibly. Bare `vtune` → usage, no pop.
+- **PT3 playback:** both ProTracker-family and Vortex-family PT3 files now use the Bulba engine. `ATTACK.PT3` was hardware-verified after removing the old Vortex proof stub.
+- **`-list` mode:** bare `vtune -list` now scans the current drive, prints the discovered tracks, selects the first one, and enters playlist playback.
 - **`-delay` CLI:** `vtune rl2wof -delay` now enters delay mode again on hardware. The earlier false-positive and always-delay regressions were fixed by restoring tune-like `CLIARGS` substring handling.
 - **Remaining delay defect:** delay mode is still too fast, channels drift out of sync, and the output gets fuzzy/noise-like. Leave this untouched for now.
 - **Hardware verification summary:**
@@ -69,7 +71,7 @@ RomWBW CP/M player (`vtune.com`) for PT2/PT3/MYM on real hardware (SC126 / RCZ18
 | **Loop toggle (`l`)** | Deferred status OK v0.0.89; host `LOOP_MODE` only at end-of-track. |
 | **PT3 metadata** | Need full header print (song name `$1E`, author `$42`, etc.); see `docs/PT3FormatSpec.md`. |
 | **Delay mode too fast / fuzzy** | `-delay` now selects the right mode, but playback timing is still wrong in delay mode: too fast, channels drift, sound becomes fuzzy/noise-like. |
-| **`-list` stub** | Scan + print + exit; exit whine (no `PSG_TOUCHED`); no pick-to-play yet. |
+| **`-list` playlist UX** | Core behavior works: scan, first-track autostart, `N`/`P` navigation. Keep an eye on metadata/status refresh when switching tracks. |
 
 ## `-delay` parser history (compressed)
 
@@ -109,6 +111,22 @@ Validation:
 Cleanup (v0.0.114):
 - Removed temporary debug marker output and keypress pauses used during isolation.
 
+## PT3 playback postmortem (v0.0.124)
+
+`ATTACK.PT3` exposed that PTx classification and PTx playback were not using the same capability boundary.
+
+- Detection/classification already recognized both ProTracker-family and Vortex-family PT3 headers.
+- Only ProTracker-family PT3 files used the Bulba engine.
+- Vortex-family PT3 files were still routed into an old proof/stub path that only poked one PSG register, so valid files classified as Vortex appeared silent.
+
+Final fix (v0.0.124):
+- Keep the Vortex/ProTracker variant distinction for display only.
+- Route both PT3 header families through the same Bulba init/tick path.
+
+Validation:
+- `ATTACK.PT3` now plays on hardware.
+- `RL2WOF.PT3` and `RL2WOFTS.PT3` continue to play.
+
 ## Rejected / do not reintroduce
 
 - **Unbounded `$81` scan** when `$0080=0` — false `-DELAY` in page-zero garbage → always delay (v0.0.103).
@@ -133,6 +151,8 @@ Cleanup (v0.0.114):
 - [x] **Hardware v0.0.108:** SC126/RCZ180 EB and RC2014/RCZ80 tested; pause/resume flawless; timer mode on SC126 without `-delay`; auto-fallback to delay mode on RC2014 (no timer hardware); explicit `-delay` flag works.
 - [x] **Hardware v0.0.113:** Startup pop fix validated on SC126 and RC2014; no pops.
 - [x] **v0.0.114 cleanup:** Removed startup debug markers/pause prompts used for pop isolation.
+- [x] **Hardware v0.0.124:** Vortex-family PT3 playback fixed; `ATTACK.PT3` now plays.
+- [x] **Hardware v0.0.124:** `vtune -list` scans and autostarts playlist playback; `N`/`P` navigation works.
 - [ ] Fix delay-mode speed/sync/fuzz.
 - [ ] Pop / `-list` whine (safer than v0.0.90).
 - [ ] PT3 metadata; interactive `-list`; TurboSound (`rl2wofts`).
