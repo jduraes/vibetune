@@ -1,6 +1,6 @@
 # VibeTune Handover
 
-**Build under test: v0.0.108 (11-Jun-2026)** — *pause/resume and timer/delay selection verified on hardware.*
+**Build under test: v0.0.109 (11-Jun-2026)** — *startup pops fixed with pre-mute at probe and engine init.*
 
 ## Goal
 
@@ -61,7 +61,7 @@ RomWBW CP/M player (`vtune.com`) for PT2/PT3/MYM on real hardware (SC126 / RCZ18
 
 | Issue | Notes |
 |-------|--------|
-| **Startup pop(s)** | With filename or `-list`; bare usage OK. `tune.com` does not pop — compare detect/init/mute order. v0.0.90 mitigations **crashed** play path — reverted v0.0.91. |
+| **Startup pop(s)** | **v0.0.109 fix:** Added PSG_MUTE_DIRECT after hardware probe and before ENGINE_INIT to clean PSG state. Testing on hardware. |
 | **Pause sustain** | **v0.0.108 verified:** Pause cuts all notes cleanly (zeros amplitude regs 8-10 + mixer). Resume continues from exact engine state—no skipped notes. ✓ |
 | **Loop toggle (`l`)** | Deferred status OK v0.0.89; host `LOOP_MODE` only at end-of-track. |
 | **PT3 metadata** | Need full header print (song name `$1E`, author `$42`, etc.); see `docs/PT3FormatSpec.md`. |
@@ -102,6 +102,7 @@ RomWBW CP/M player (`vtune.com`) for PT2/PT3/MYM on real hardware (SC126 / RCZ18
 ## Open / verify
 
 - [x] **Hardware v0.0.108:** SC126/RCZ180 EB and RC2014/RCZ80 tested; pause/resume flawless; timer mode on SC126 without `-delay`; auto-fallback to delay mode on RC2014 (no timer hardware); explicit `-delay` flag works.
+- [ ] **Hardware v0.0.109:** Startup pops fixed; needs testing to verify pops eliminated.
 - [ ] Fix delay-mode speed/sync/fuzz.
 - [ ] Pop / `-list` whine (safer than v0.0.90).
 - [ ] PT3 metadata; interactive `-list`; TurboSound (`rl2wofts`).
