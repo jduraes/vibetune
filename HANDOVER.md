@@ -11,11 +11,10 @@ RomWBW CP/M player (`vtune.com`) for PT2/PT3/MYM on real hardware (SC126 / RCZ18
 - **Play path works** on target: `vtune rl2wof` / `vtune rl2wofts` load, **timer mode**, play audibly. Bare `vtune` → usage, no pop.
 - **`-delay` CLI:** `vtune rl2wof -delay` now enters delay mode again on hardware. The earlier false-positive and always-delay regressions were fixed by restoring tune-like `CLIARGS` substring handling.
 - **Remaining delay defect:** delay mode is still too fast, channels drift out of sync, and the output gets fuzzy/noise-like. Leave this untouched for now.
-- **Hardware verification (v0.0.113):**
-  - **SC126 / RCZ180 EB:** startup is clean, no pop.
-  - **RC2014 / RCZ80:** startup is clean, no pop.
-  - Temporary startup debug markers used for isolation were removed in v0.0.114.
-- **Hardware verification (v0.0.108):**
+- **Hardware verification summary:**
+  - **v0.0.113:** SC126 / RCZ180 EB and RC2014 / RCZ80 startup is clean (no pop).
+  - **v0.0.114:** temporary startup debug markers used for isolation were removed.
+  - **v0.0.108:**
   - **SC126 / RCZ180 EB:** `vtune rl2wof` → timer mode; `vtune rl2wof -delay` → delay mode. Confirms explicit `-delay` flag works correctly.
   - **RC2014 / RCZ80:** Auto-fallback to delay mode (no timer hardware). Delay mode playback tested and working.
 - Build: `Build.cmd` → TASM `-t80 -g3 -fFF -dWBW` → `vtune.com` → `..\RomWBW\Binary\Apps\vtune.com`.
