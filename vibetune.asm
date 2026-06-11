@@ -303,8 +303,13 @@ START_SCAN:
 	OR	A
 	JP	Z, START_EXIT
 	CALL	PRINT_TRACK_LIST
-	; List mode is informational only: return to CCP after printing.
-	JP	START_EXIT
+	LD	A, LOOP_PLAYLIST
+	LD	(LOOP_MODE), A
+	CALL	COPY_SELECTED_TRACK_TO_ARG
+	CALL	CLASSIFY_ARG_EXTENSION
+	OR	A
+	JP	NZ, START_EXIT
+	JP	START_OK
 
 START_EXIT:
 	; Restore CP/M default DMA (0080h) before returning to CCP/BDOS.
@@ -543,6 +548,17 @@ APPLY_DELAY_FROM_CMDLINE:
 	LD	(DELAYMD), A
 	RET
 
+; Detect -list directly from NUL-terminated CLIARGS at $0081.
+; This avoids dependence on CP/M tail-length byte semantics for switch-only calls.
+APPLY_LIST_FROM_CMDLINE:
+	LD	HL, $0081
+	LD	DE, MSG_SWITCH_LIST
+	CALL	STRINDEX_TUNE
+	RET	NZ
+	LD	A, RUNMODE_LIST
+	LD	(RUN_MODE), A
+	RET
+
 ; tune.com strings.inc STRINDEX behavior for a NUL-terminated haystack.
 STRINDEX_TUNE:
 	LD	B, 0
@@ -708,6 +724,7 @@ PARSE_CLR_ARG_BUF:
 	INC	HL
 	DJNZ	PARSE_CLR_ARG_BUF
 	CALL	SCAN_CMDLINE_SWITCHES
+	CALL	APPLY_LIST_FROM_CMDLINE
 	LD	A, (RUN_MODE)
 	CP	RUNMODE_LIST
 	JR	Z, PARSE_CL_DONE
@@ -2251,30 +2268,7 @@ PDS_EMIT:
 ; Reload the track selected by TRACK_SELECTED from TRACK_LIST.
 ; Rebuilds FCB_WORK from the track name, reinits engine, re-enters main loop.
 MAIN_RELOAD_TRACK:
-	; Compute pointer: HL = TRACK_LIST + TRACK_SELECTED * TRACK_NAME_LEN
-	LD	A, (TRACK_SELECTED)
-	LD	B, A
-	LD	HL, 0
-MAIN_RELOAD_MUL:
-	LD	A, B
-	OR	A
-	JR	Z, MAIN_RELOAD_MUL_DONE
-	DEC	B
-	LD	DE, TRACK_NAME_LEN
-	ADD	HL, DE
-	JR	MAIN_RELOAD_MUL
-MAIN_RELOAD_MUL_DONE:
-	LD	DE, TRACK_LIST
-	ADD	HL, DE			; HL = TRACK_LIST + selected * TRACK_NAME_LEN
-	; Copy track name to ARG_BUFFER
-	LD	DE, ARG_BUFFER
-	LD	B, TRACK_NAME_LEN
-MAIN_RELOAD_CPY:
-	LD	A, (HL)
-	LD	(DE), A
-	INC	HL
-	INC	DE
-	DJNZ	MAIN_RELOAD_CPY
+	CALL	COPY_SELECTED_TRACK_TO_ARG
 	; Rebuild FCB from ARG_BUFFER
 	CALL	BUILD_FCB_FROM_ARG
 	OR	A
@@ -2291,6 +2285,32 @@ MAIN_RELOAD_CPY:
 	JP	NZ, MAIN_LOOP_END
 	CALL	UPDATE_AUDIO_MODE_FROM_MUSIC
 	JP	MAIN_LOOP
+
+; Copy TRACK_SELECTED entry from TRACK_LIST to ARG_BUFFER.
+COPY_SELECTED_TRACK_TO_ARG:
+	LD	A, (TRACK_SELECTED)
+	LD	B, A
+	LD	HL, 0
+COPY_SEL_MUL:
+	LD	A, B
+	OR	A
+	JR	Z, COPY_SEL_MUL_DONE
+	DEC	B
+	LD	DE, TRACK_NAME_LEN
+	ADD	HL, DE
+	JR	COPY_SEL_MUL
+COPY_SEL_MUL_DONE:
+	LD	DE, TRACK_LIST
+	ADD	HL, DE
+	LD	DE, ARG_BUFFER
+	LD	B, TRACK_NAME_LEN
+COPY_SEL_CPY:
+	LD	A, (HL)
+	LD	(DE), A
+	INC	HL
+	INC	DE
+	DJNZ	COPY_SEL_CPY
+	RET
 
 ; Determine runtime audio routing from loaded music content.
 ; PT3: enable TurboSound routing when a second embedded PT3 header exists.
