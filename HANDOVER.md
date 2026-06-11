@@ -1,6 +1,6 @@
 # VibeTune Handover
 
-**Build under test: v0.0.107 (08-Jun-2026)** — *timer/delay selection verified on hardware.*
+**Build under test: v0.0.108 (11-Jun-2026)** — *pause/resume and timer/delay selection verified on hardware.*
 
 ## Goal
 
@@ -47,7 +47,7 @@ RomWBW CP/M player (`vtune.com`) for PT2/PT3/MYM on real hardware (SC126 / RCZ18
 
 ## Audio policy (keep)
 
-- Pause: mixer reg 7 = `$3F` only (no ROUT zero-fill — pause pops).
+- **Pause (v0.0.108):** Zeros amplitude registers (8-10) + mixer reg 7 = `$3F` for complete 100% note mute. Resume continues from engine's exact internal position.
 - Exit mute via ROUT only when `PSG_TOUCHED`.
 
 ## SIMH (non-hardware)
@@ -60,7 +60,7 @@ RomWBW CP/M player (`vtune.com`) for PT2/PT3/MYM on real hardware (SC126 / RCZ18
 | Issue | Notes |
 |-------|--------|
 | **Startup pop(s)** | With filename or `-list`; bare usage OK. `tune.com` does not pop — compare detect/init/mute order. v0.0.90 mitigations **crashed** play path — reverted v0.0.91. |
-| **Pause sustain** | **v0.0.108 fix:** Pause now zeros amplitude registers (8-10) + mixer (7=$3F) for complete 100% mute. Resume continues from exact engine state. |
+| **Pause sustain** | **v0.0.108 verified:** Pause cuts all notes cleanly (zeros amplitude regs 8-10 + mixer). Resume continues from exact engine state—no skipped notes. ✓ |
 | **Loop toggle (`l`)** | Deferred status OK v0.0.89; host `LOOP_MODE` only at end-of-track. |
 | **PT3 metadata** | Need full header print (song name `$1E`, author `$42`, etc.); see `docs/PT3FormatSpec.md`. |
 | **Delay mode too fast / fuzzy** | `-delay` now selects the right mode, but playback timing is still wrong in delay mode: too fast, channels drift, sound becomes fuzzy/noise-like. |
@@ -99,9 +99,10 @@ RomWBW CP/M player (`vtune.com`) for PT2/PT3/MYM on real hardware (SC126 / RCZ18
 
 ## Open / verify
 
-- [ ] **Hardware v0.0.107:** `vtune rl2wof` → **timer mode**; `vtune rl2wof -delay` → **delay mode**; fix delay-mode speed/sync/fuzz.
+- [x] **Hardware v0.0.108:** Pause/resume works flawlessly; timer mode without `-delay`; delay mode with `-delay`.
+- [ ] Fix delay-mode speed/sync/fuzz.
 - [ ] Pop / `-list` whine (safer than v0.0.90).
-- [ ] Pause sustain; PT3 metadata; interactive `-list`; TurboSound (`rl2wofts`).
+- [ ] PT3 metadata; interactive `-list`; TurboSound (`rl2wofts`).
 
 ## Key files
 
