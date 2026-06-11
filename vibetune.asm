@@ -1942,8 +1942,21 @@ PSG_MUTE_ALL:
 PSG_SILENCE:
 	JP	PSG_MUTE_ALL
 
-; Pause: mixer all-off only (reg 7=$3F). Avoids ROUT zero-fill pops on Space.
+; Pause: zero amplitude regs (8-10) + mixer (7=$3F) to ensure 100% note mute.
 PSG_MIXER_OFF:
+	; Zero amplitude channel A (reg 8)
+	LD	B, 8
+	LD	C, 0
+	CALL	PSG_WRITE_ROUTED
+	; Zero amplitude channel B (reg 9)
+	LD	B, 9
+	LD	C, 0
+	CALL	PSG_WRITE_ROUTED
+	; Zero amplitude channel C (reg 10)
+	LD	B, 10
+	LD	C, 0
+	CALL	PSG_WRITE_ROUTED
+	; Mute mixer output (reg 7 = $3F)
 	LD	B, 7
 	LD	C, $3F
 	JP	PSG_WRITE_ROUTED

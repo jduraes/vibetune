@@ -60,7 +60,7 @@ RomWBW CP/M player (`vtune.com`) for PT2/PT3/MYM on real hardware (SC126 / RCZ18
 | Issue | Notes |
 |-------|--------|
 | **Startup pop(s)** | With filename or `-list`; bare usage OK. `tune.com` does not pop — compare detect/init/mute order. v0.0.90 mitigations **crashed** play path — reverted v0.0.91. |
-| **Pause sustain** | Mixer-only pause sometimes leaves note ringing; investigate envelope/noise / TS routing / tick race. |
+| **Pause sustain** | **v0.0.108 fix:** Pause now zeros amplitude registers (8-10) + mixer (7=$3F) for complete 100% mute. Resume continues from exact engine state. |
 | **Loop toggle (`l`)** | Deferred status OK v0.0.89; host `LOOP_MODE` only at end-of-track. |
 | **PT3 metadata** | Need full header print (song name `$1E`, author `$42`, etc.); see `docs/PT3FormatSpec.md`. |
 | **Delay mode too fast / fuzzy** | `-delay` now selects the right mode, but playback timing is still wrong in delay mode: too fast, channels drift, sound becomes fuzzy/noise-like. |
