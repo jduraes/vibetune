@@ -123,6 +123,7 @@ START:
 	CALL	CRLF
 	; tune.com CLI_HAVE_DELAY_SWITCH: read $81 before any BDOS file I/O.
 	CALL	APPLY_DELAY_FROM_CMDLINE
+	CALL	APPLY_LIST_FROM_CMDLINE
 	CALL	PARSE_AND_CLASSIFY
 	OR	A
 	JP	Z, START_AFTER_PARSE_OK
@@ -548,12 +549,11 @@ APPLY_DELAY_FROM_CMDLINE:
 	LD	(DELAYMD), A
 	RET
 
-; Detect -list directly from NUL-terminated CLIARGS at $0081.
-; This avoids dependence on CP/M tail-length byte semantics for switch-only calls.
+; Detect -LIST directly from CLIARGS at $0081, matching the proven -DELAY path.
 APPLY_LIST_FROM_CMDLINE:
 	LD	HL, $0081
-	LD	DE, MSG_SWITCH_LIST
-	CALL	STRINDEX_UP_CMDTAIL
+	LD	DE, MSG_SWITCH_LIST_TUNE
+	CALL	STRINDEX_TUNE
 	RET	NZ
 	LD	A, RUNMODE_LIST
 	LD	(RUN_MODE), A
@@ -743,7 +743,6 @@ PARSE_CLR_ARG_BUF:
 	INC	HL
 	DJNZ	PARSE_CLR_ARG_BUF
 	CALL	SCAN_CMDLINE_SWITCHES
-	CALL	APPLY_LIST_FROM_CMDLINE
 	LD	A, (RUN_MODE)
 	CP	RUNMODE_LIST
 	JR	Z, PARSE_CL_DONE
@@ -3221,6 +3220,8 @@ MSG_USAGE:
 	.DB	"Usage: VTUNE [switches] file[.pt3|.pt2|.mym]  switches: -delay -msx -rc -coleco -eb -list", 0
 MSG_SWITCH_LIST:
 	.DB	"-list", 0
+MSG_SWITCH_LIST_TUNE:
+	.DB	"-LIST", 0
 MSG_SWITCH_MSX:
 	.DB	"-msx", 0
 MSG_SWITCH_RC:
