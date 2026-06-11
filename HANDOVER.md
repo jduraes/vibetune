@@ -1,6 +1,6 @@
 # VibeTune Handover
 
-**Build under test: v0.0.109 (11-Jun-2026)** — *startup pops fixed with pre-mute at probe and engine init.*
+**Build under test: v0.0.114 (11-Jun-2026)** — *startup pop fixes validated on SC126 and RC2014; debug instrumentation removed.*
 
 ## Goal
 
@@ -11,6 +11,10 @@ RomWBW CP/M player (`vtune.com`) for PT2/PT3/MYM on real hardware (SC126 / RCZ18
 - **Play path works** on target: `vtune rl2wof` / `vtune rl2wofts` load, **timer mode**, play audibly. Bare `vtune` → usage, no pop.
 - **`-delay` CLI:** `vtune rl2wof -delay` now enters delay mode again on hardware. The earlier false-positive and always-delay regressions were fixed by restoring tune-like `CLIARGS` substring handling.
 - **Remaining delay defect:** delay mode is still too fast, channels drift out of sync, and the output gets fuzzy/noise-like. Leave this untouched for now.
+- **Hardware verification (v0.0.113):**
+  - **SC126 / RCZ180 EB:** startup is clean, no pop.
+  - **RC2014 / RCZ80:** startup is clean, no pop.
+  - Temporary startup debug markers used for isolation were removed in v0.0.114.
 - **Hardware verification (v0.0.108):**
   - **SC126 / RCZ180 EB:** `vtune rl2wof` → timer mode; `vtune rl2wof -delay` → delay mode. Confirms explicit `-delay` flag works correctly.
   - **RC2014 / RCZ80:** Auto-fallback to delay mode (no timer hardware). Delay mode playback tested and working.
@@ -61,7 +65,7 @@ RomWBW CP/M player (`vtune.com`) for PT2/PT3/MYM on real hardware (SC126 / RCZ18
 
 | Issue | Notes |
 |-------|--------|
-| **Startup pop(s)** | **v0.0.109 fix:** Added PSG_MUTE_DIRECT after hardware probe and before ENGINE_INIT to clean PSG state. Testing on hardware. |
+| **Startup pop(s)** | **Fixed (v0.0.113, cleanup v0.0.114):** root causes documented below; validated clean on SC126 and RC2014. |
 | **Pause sustain** | **v0.0.108 verified:** Pause cuts all notes cleanly (zeros amplitude regs 8-10 + mixer). Resume continues from exact engine state—no skipped notes. ✓ |
 | **Loop toggle (`l`)** | Deferred status OK v0.0.89; host `LOOP_MODE` only at end-of-track. |
 | **PT3 metadata** | Need full header print (song name `$1E`, author `$42`, etc.); see `docs/PT3FormatSpec.md`. |
@@ -79,6 +83,32 @@ RomWBW CP/M player (`vtune.com`) for PT2/PT3/MYM on real hardware (SC126 / RCZ18
 | v0.0.103 | **Always delay** | Unbounded scan past empty `$81` into stale buffer; `DELAYMD` never cleared; `DELAYMD_SAVED` sticky. |
 | v0.0.104 | **Fix attempt** | Bounded tail only; clear-then-set; one `-DELAY` check after banner; no `DELAYMD_SAVED`. |
 | v0.0.105–107 | **Fix verified** | Restored tune-like `CLIARGS` substring handling; hardware now shows timer mode without `-delay` and delay mode with `-delay`. |
+
+## Startup pop postmortem (v0.0.109-v0.0.113)
+
+Two separate startup-audio defects existed and were fixed in stages.
+
+1. **Pop at/after hardware probe (first defect):**
+  - Probe writes `R2=$AA` to test AY presence (`PROBE_AY_PORTS`).
+  - Startup PSG state is unknown, so probe activity could leak audible transitions.
+  - Initial mitigation in v0.0.109: call `PSG_MUTE_DIRECT` after detection/probe and again before engine init. This reduced startup pops from two to one.
+
+2. **Pop + temporary high-pitched whine around probe success (second defect):**
+  - Isolated using single-character startup markers with per-marker pauses on hardware.
+  - Repro showed event between probe success (`E`) and post-detect stage (`2`).
+  - Root cause: `PROBE_AY_QUIET` wrote mixer register 7 to `$3F` (mute mixer) but wrote amplitude registers 8/9/10 to `$0F` (max volume), not zero.
+  - This left channels armed at max amplitude; later register activity could produce a pop/whine burst until full mute/path initialization completed.
+
+Final fix (v0.0.113):
+- Change `PROBE_AY_QUIET` amplitude writes for regs 8/9/10 from `$0F` to `$00`.
+- Keep post-detection `PSG_MUTE_DIRECT` for full-register safety cleanup.
+
+Validation:
+- SC126 (RCZ180 EB): clean startup, no pops.
+- RC2014 (RCZ80): clean startup, no pops.
+
+Cleanup (v0.0.114):
+- Removed temporary debug marker output and keypress pauses used during isolation.
 
 ## Rejected / do not reintroduce
 
@@ -102,7 +132,8 @@ RomWBW CP/M player (`vtune.com`) for PT2/PT3/MYM on real hardware (SC126 / RCZ18
 ## Open / verify
 
 - [x] **Hardware v0.0.108:** SC126/RCZ180 EB and RC2014/RCZ80 tested; pause/resume flawless; timer mode on SC126 without `-delay`; auto-fallback to delay mode on RC2014 (no timer hardware); explicit `-delay` flag works.
-- [ ] **Hardware v0.0.109:** Startup pops fixed; needs testing to verify pops eliminated.
+- [x] **Hardware v0.0.113:** Startup pop fix validated on SC126 and RC2014; no pops.
+- [x] **v0.0.114 cleanup:** Removed startup debug markers/pause prompts used for pop isolation.
 - [ ] Fix delay-mode speed/sync/fuzz.
 - [ ] Pop / `-list` whine (safer than v0.0.90).
 - [ ] PT3 metadata; interactive `-list`; TurboSound (`rl2wofts`).
