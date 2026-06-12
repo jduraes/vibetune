@@ -1,6 +1,6 @@
 ;===============================================================================
 ; PT3 engine — Bulba-compatible decode/output (clean-room).
-; Format reference: PT3FormatSpec.md. Output via PSG_WRITE_ROUTED.
+; Format reference: docs/PT3FormatSpec.md. Output via PSG_WRITE_ROUTED.
 
 #DEFINE PT3_SPEED_OFF   100
 #DEFINE PT3_PATTAB_OFF  103

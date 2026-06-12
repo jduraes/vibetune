@@ -250,6 +250,7 @@ START_LOAD_ENGINE_OK:
 	LD	A, (FILE_ENGINE)
 START_LOAD_SHOW_MODE:
 	CALL	CRLF
+	CALL	PRINT_TIMING_DEBUG
 	CALL	PRINT_PLAYBACK_HW_CONFIG
 	CALL	PRINT_CURRENT_TRACK_STATUS
 	CALL	UPDATE_AUDIO_MODE_FROM_MUSIC
@@ -1829,6 +1830,17 @@ PRINT_DEC_UNITS:
 	ADD	A, '0'
 	JP	PRTCHR
 
+; Alias for timing.inc debug helpers.
+PRINT_DEC_BYTE:
+	JP	PRINT_DECIMAL_BYTE
+
+; Print HL as 4-digit hex (debug; e.g. 3686 -> 0E66).
+PRINT_DEC_WORD:
+	LD	A, H
+	CALL	PRINT_HEX_BYTE
+	LD	A, L
+	JP	PRINT_HEX_BYTE
+
 ;===============================================================================
 ; Milestone 4: Playback architecture foundation
 ;===============================================================================
@@ -2719,6 +2731,7 @@ MAIN_RELOAD_TRACK:
 	CALL	APPLY_ENGINE_QDLY_ADJ
 	CALL	UPDATE_AUDIO_MODE_FROM_MUSIC
 	CALL	CRLF
+	CALL	PRINT_TIMING_DEBUG
 	CALL	PRINT_PLAYBACK_HW_CONFIG
 	CALL	PRINT_CURRENT_TRACK_STATUS
 	CALL	PRINT_AUDIO_MODE_STATUS
@@ -3730,6 +3743,18 @@ MSG_SWITCH_DELAY_TUNE:
 	.DB	"-DELAY", 0
 MSG_SWITCH_DELAY_WORD:
 	.DB	"delay", 0
+MSG_DBG_CPU:
+	.DB	"  CPU kHz (hex): ", 0
+MSG_DBG_QDLY0:
+	.DB	"  QDLY0 (hex): ", 0
+MSG_DBG_SUB1:
+	.DB	"  after bias (hex): ", 0
+MSG_DBG_QDLY:
+	.DB	"  QDLY final (hex): ", 0
+MSG_DBG_APPLY:
+	.DB	"  apply# (hex): ", 0
+MSG_DBG_FLAGS:
+	.DB	"  flags eng/ts/dual/wmod (dec): ", 0
 MSG_ERR_NO_ARG:
 	.DB	"Error: missing file argument.", 0
 MSG_ERR_TOO_MANY:
@@ -3818,6 +3843,14 @@ EXIT_MSG_ON:
 PSG_HW_VALID:
 	.DB	0
 QDLY:
+	.DW	0
+QDLY0:
+	.DW	0	; HBIOS CPU kHz/2 base; APPLY always starts here
+CPUKHZ:
+	.DW	0	; raw CPU kHz from HBIOS $F0 (before /2)
+QDLY_DBG1:
+	.DW	0	; after engine bias subtract
+APPLY_COUNT:
 	.DW	0
 WMOD:
 	.DB	0

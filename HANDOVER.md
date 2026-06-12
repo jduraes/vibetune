@@ -1,23 +1,25 @@
 # VibeTune Handover
 
-**Build under test: v0.0.135 (12-Jun-2026)** — *TurboSound playback + clean exit verified on MSX; delay-mode tempo still open.*
+**Build under test: v0.0.148 (12-Jun-2026)** — *TurboSound delay-mode tempo verified **94 BPM** on RC2014 @ 7.3728 MHz (`rl2wofts`); tune.com-equivalent QDLY path + RC2014 VT-overhead trim.*
 
 ## Session Delta (2026-06-11 to 2026-06-12)
 
-- Version bumped to **v0.0.135** in `vtversion.inc`.
+- Version bumped through **v0.0.148** in `vtversion.inc`.
 - **TurboSound runtime (v0.0.131–132):** full dual-chip path (`TS_INIT` / `TS_PLAYQUARK` / `TS_MUTE`), Coleco chip-2 fallback `$50/$51`, `TS_VERIFY_DUAL_PORTS`, per-chip `VT_/NT_` context save, tune-style `TS_INIT` ordering.
-- **TurboSound UX (v0.0.133):** post-load hardware lines for both chips; delay-mode QDLY subtracts a second `-185` for dual-quark overhead (replacing ineffective `97/128` scale).
+- **TurboSound delay tempo (v0.0.136–148):** see postmortem below — **v0.0.148** lands **94 BPM** on RC2014 delay mode for `rl2wofts`.
 - **TurboSound exit (v0.0.134–135):** hardware mute before BDOS; `BDOS` fn 0 return; disable Bulba `LoopChecker` (CHECKLP `POP` corrupted stack); `FLUSH_KEYS` on quit.
+- **Repo hygiene:** planning docs moved to `archive/docs/`; active specs/scripts under `docs/` and `scripts/`.
 
 Hardware/behavior validation from this session:
 
 - `vtune rl2wof` on RCZ180 EB and MSX: playback good (single-chip baseline).
 - `vtune rl2wofts` on MSX (TurboSound): **playback good (v0.0.132+)**; **clean Esc exit (v0.0.135)**.
-- TurboSound delay-mode tempo: still too slow (open; tune.com shares this limitation on MSX delay path).
+- **RC2014 / RCZ80 (delay auto-fallback):** `vtune rl2wofts` — **94 BPM verified (v0.0.148)**; QDLY final `0x683` (1667), trim **986** loops after `TS_ADJTIM`.
 
 Immediate next debugging target:
 
-- TurboSound **delay-mode tempo** on MSX (`rl2wofts` vs `rl2wof` reference).
+- Optional: remove `PRINT_TIMING_DEBUG` once tempo stable across more tunes/hardware.
+- Single-chip delay-mode speed/sync/fuzz (unchanged; separate from TS tempo fix).
 
 ## Goal
 
@@ -76,8 +78,9 @@ RomWBW CP/M player (`vtune.com`) for PT2/PT3/MYM on real hardware (SC126 / RCZ18
 
 ## SIMH (non-hardware)
 
-- `Sync-SIMH-Content.ps1 -Force` → `Run-SIMH-VibeTune.cmd` → boot **`2.4`** (not `2`, not `3.x`); image **`hd1k_combo.img`**.
-- Piped keystrokes into SIMH on Windows unreliable; use interactive boot. See `docs/SIMH-Testing.md`.
+- See `docs/SIMH-Testing.md`. Launch scripts were removed from repo root in this session; use RomWBW tooling or restore from git history if needed.
+- Boot **`2.4`** (not `2`, not `3.x`); image **`hd1k_combo.img`**.
+- Piped keystrokes into SIMH on Windows unreliable; use interactive boot.
 
 ## Known problems (user-reported, still open)
 
@@ -87,7 +90,7 @@ RomWBW CP/M player (`vtune.com`) for PT2/PT3/MYM on real hardware (SC126 / RCZ18
 | **Pause sustain** | **v0.0.108 verified:** Pause cuts all notes cleanly (zeros amplitude regs 8-10 + mixer). Resume continues from exact engine state—no skipped notes. ✓ |
 | **Loop toggle (`l`)** | Deferred status OK v0.0.89; host `LOOP_MODE` only at end-of-track. |
 | **PT3 metadata** | Need full header print (song name `$1E`, author `$42`, etc.); see `docs/PT3FormatSpec.md`. |
-| **Delay mode too fast / fuzzy** | `-delay` now selects the right mode, but playback timing is still wrong in delay mode: too fast, channels drift, sound becomes fuzzy/noise-like. |
+| **Delay mode too fast / fuzzy** | Single-chip delay path still open. **TurboSound dual on RC2014 delay:** fixed v0.0.148 (~94 BPM `rl2wofts`, matches tune.com reference). |
 | **`-list` playlist UX** | Core behavior works: scan, first-track autostart, `N`/`P` navigation. Keep an eye on metadata/status refresh when switching tracks. |
 
 ## `-delay` parser history (compressed)
@@ -157,6 +160,48 @@ Validation:
 Validation (MSX, delay mode):
 - `vtune rl2wofts` — audible dual-chip playback; Esc → silent, single `Exiting.`, clean CCP return (v0.0.135).
 
+## TurboSound delay tempo postmortem (v0.0.136–v0.0.148)
+
+Target: **~94 BPM** for `RL2WOFTS.PT3` on **RC2014 @ 7.3728 MHz** (auto delay mode; HBIOS timer tick = 0). Reference: RomWBW **`tune.com` v3.2b100** reads ~93 BPM on same hardware.
+
+### Root causes (stacked)
+
+1. **WAITQ zero-guard bug (v0.0.141)** — `LD BC,1` ran *before* `JR NZ`, clobbering QDLY every frame → ~1 loop iteration → ~174 BPM. Fixed to match tune.com: test BC first, `LD BC,1` only when QDLY==0.
+2. **QDLY apply stacking (v0.0.138)** — `APPLY_ENGINE_QDLY_ADJ` must always derive from HBIOS base in `QDLY0`, not mutate `(QDLY)` in place (was ~163 BPM when stacked).
+3. **Failed scale heuristics (v0.0.136–137)** — `×65/94` / divide-first 16-bit routines had overflow and compare bugs (QDLY→0 re-triggered cartoon speed). Abandoned; tune.com path is **one −185**, then **`TS_ADJTIM` (×97/128)** only.
+4. **VibeTune vs tune.com play overhead** — At identical post-`TS_ADJTIM` QDLY **2653 (`0A5D`)**, tune.com ≈93 BPM but VibeTune ≈74.5 BPM after WAITQ fix. Cause: per-quark **432-byte `VT_/NT_` LDIR** in `TS_PLAYQUARK` (required for garbled-audio fix); tune.com `TS_PLAYQUARK` calls `PLAY` without that cost.
+
+### Tempo model (why empirical trim was needed)
+
+Frame time ≈ **play_overhead + QDLY × 40 T-states**. BPM is **not** `∝ 1/QDLY`. Inverse-product retuning (`Q_new = Q × BPM_old / BPM_target`) consistently undershot when speeding up; linear extrapolation from early points overshot when pushed too far.
+
+**RC2014 calibration table** (delay, TS dual, after `TS_ADJTIM` baseline 2653):
+
+| Trim | QDLY (hex) | BPM |
+|------|------------|-----|
+| 0 | 0A5D | 74.5 |
+| 528 | 084D | 84 |
+| 755 | 076A | 89 |
+| 856 | 0705 | 90 |
+| **986** | **0683** | **94** ✓ |
+| 1084 | 0621 | 97 |
+
+Final trim **986** = bracket between 856→90 and 1084→97: `856 + (94−90) × (228/7)`.
+
+### Pipeline (v0.0.148, `timing.inc`)
+
+1. `INIT_QDLY_BASE`: HBIOS `$F0` → `CPUKHZ`; `QDLY0 = kHz/2` (7372 → 3686 `0E66`).
+2. `APPLY_ENGINE_QDLY_ADJ`: from `QDLY0`, subtract **185** (PTX) → `0DAD`; if PTx + TS dual + delay mode: `TS_ADJTIM` → `0A5D`; subtract **986** → **`0x683` (1667)**.
+3. `WAITQ`: timer path when `WMOD≠0`; else delay loop (40 T-states/iter, tune.com zero-guard).
+4. **`PRINT_TIMING_DEBUG`** (temporary): prints CPU kHz, QDLY0, post-bias, final QDLY, apply count, flags — remove when broader validation done.
+
+### Long-term fix (not done)
+
+Shrink TS per-quark overhead (optimize or reduce `VT_/NT_` context copies) so tune.com QDLY path alone suffices and CPU-specific trim → 0.
+
+Validation (RC2014, delay auto-fallback):
+- `vtune rl2wofts` — **94 BPM on the dot (v0.0.148)**; debug line matches table above.
+
 ## Rejected / do not reintroduce
 
 - **Unbounded `$81` scan** when `$0080=0` — false `-DELAY` in page-zero garbage → always delay (v0.0.103).
@@ -164,6 +209,7 @@ Validation (MSX, delay mode):
 - **`DELAYMD_SAVED` sticky restore** across parse — preserves false positives.
 - **Setting `DELAYMD` without clearing first** in final delay path.
 - **v0.0.90** pop/whine patches — hung after banner on hardware.
+- **v0.0.136–137 QDLY scale routines** (`×65/94`, broken 16-bit divide) — use tune.com −185 + `TS_ADJTIM` + measured trim only.
 - **Clean-room engine**, `.DS` in emitted COM, `HEAP_CLEAR` from `HEAP`, inverted `PROBETIMER` test.
 - **New brittle SIMH automation** (long waits, piped boot) — use existing scripts only.
 - **Standalone `hd1k_zpm3.img` attach** — HALT; use combo + `2.4`.
@@ -184,8 +230,9 @@ Validation (MSX, delay mode):
 - [x] **Hardware v0.0.124:** Vortex-family PT3 playback fixed; `ATTACK.PT3` now plays.
 - [x] **Hardware v0.0.124:** `vtune -list` scans and autostarts playlist playback; `N`/`P` navigation works.
 - [x] **Hardware v0.0.131–135:** TurboSound `rl2wofts` on MSX — playback and clean Esc exit verified.
-- [ ] TurboSound delay-mode tempo on MSX (still slow; shared with tune.com delay path).
-- [ ] Fix delay-mode speed/sync/fuzz (single-chip).
+- [x] **Hardware v0.0.148:** RC2014 delay-mode TurboSound tempo — **94 BPM** on `rl2wofts` (trim 986, QDLY `0x683`).
+- [ ] Optional: strip `PRINT_TIMING_DEBUG` after more hardware/tune coverage.
+- [ ] Fix delay-mode speed/sync/fuzz (single-chip, non-TS).
 - [ ] Pop / `-list` whine (safer than v0.0.90).
 
 ## Key files
@@ -194,12 +241,12 @@ Validation (MSX, delay mode):
 |------|------|
 | `vibetune.asm` | Startup, CLI parse, HW detect, load, loop, `-DELAY` logic |
 | `pt3bulba.inc` / `pt3bulba_shim.inc` | Bulba player + glue |
-| `timing.inc` | `WAITQ`, `PROBETIMER`, `QDLY` |
+| `timing.inc` | `WAITQ`, `PROBETIMER`, `QDLY`/`QDLY0`, `TS_ADJTIM`, TS trim, timing debug print |
 | `vtversion.inc` | Version / date |
 | `Build.cmd` | Build + copy to RomWBW |
-| `Run-SIMH-VibeTune.cmd`, `Sync-SIMH-Content.ps1` | SIMH sync + launch |
-| `Validate-StructureChecks.ps1` | Format validation harness |
 | `HANDOVER.md` | This file |
-| `docs/PT3FormatSpec.md`, `docs/SIMH-Testing.md` | Specs |
+| `docs/PT3FormatSpec.md`, `docs/SIMH-Testing.md` | Active specs |
+| `archive/docs/` | Superseded planning docs (see `README.md`) |
+| `scripts/Validate-StructureChecks.ps1` | Format validation harness |
 
 Reference: `..\RomWBW\Source\Apps\Tune\tune.asm`.

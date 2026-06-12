@@ -7,7 +7,7 @@ The shipping player uses the S.V. Bulba PT2/PT3 player extracted from RomWBW
 
 ## What we tried
 
-A from-scratch PT3 decoder, written against `PT3FormatSpec.md`:
+A from-scratch PT3 decoder, written against `docs/PT3FormatSpec.md`:
 
 | File | Role |
 |------|------|
