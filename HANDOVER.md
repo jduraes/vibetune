@@ -1,6 +1,23 @@
 # VibeTune Handover
 
-**Build under test: v0.0.125 (11-Jun-2026)** — *startup pop fixes validated; `-list` scans and starts playlist playback; Vortex PT3 files now play through Bulba.*
+**Build under test: v0.0.135 (12-Jun-2026)** — *TurboSound playback + clean exit verified on MSX; delay-mode tempo still open.*
+
+## Session Delta (2026-06-11 to 2026-06-12)
+
+- Version bumped to **v0.0.135** in `vtversion.inc`.
+- **TurboSound runtime (v0.0.131–132):** full dual-chip path (`TS_INIT` / `TS_PLAYQUARK` / `TS_MUTE`), Coleco chip-2 fallback `$50/$51`, `TS_VERIFY_DUAL_PORTS`, per-chip `VT_/NT_` context save, tune-style `TS_INIT` ordering.
+- **TurboSound UX (v0.0.133):** post-load hardware lines for both chips; delay-mode QDLY subtracts a second `-185` for dual-quark overhead (replacing ineffective `97/128` scale).
+- **TurboSound exit (v0.0.134–135):** hardware mute before BDOS; `BDOS` fn 0 return; disable Bulba `LoopChecker` (CHECKLP `POP` corrupted stack); `FLUSH_KEYS` on quit.
+
+Hardware/behavior validation from this session:
+
+- `vtune rl2wof` on RCZ180 EB and MSX: playback good (single-chip baseline).
+- `vtune rl2wofts` on MSX (TurboSound): **playback good (v0.0.132+)**; **clean Esc exit (v0.0.135)**.
+- TurboSound delay-mode tempo: still too slow (open; tune.com shares this limitation on MSX delay path).
+
+Immediate next debugging target:
+
+- TurboSound **delay-mode tempo** on MSX (`rl2wofts` vs `rl2wof` reference).
 
 ## Goal
 
@@ -8,7 +25,7 @@ RomWBW CP/M player (`vtune.com`) for PT2/PT3/MYM on real hardware (SC126 / RCZ18
 
 ## State
 
-- **Play path works** on target: `vtune rl2wof` / `vtune rl2wofts` load, **timer mode**, play audibly. Bare `vtune` → usage, no pop.
+- **TurboSound:** auto-detected dual PT3 (`rl2wofts`); prints both chip port sets; MSX + Coleco fallback when HBIOS has no second device query.
 - **PT3 playback:** both ProTracker-family and Vortex-family PT3 files now use the Bulba engine. `ATTACK.PT3` was hardware-verified after removing the old Vortex proof stub.
 - **`-list` mode:** bare `vtune -list` now scans the current drive, prints the discovered tracks, selects the first one, and enters playlist playback.
 - **`-delay` CLI:** `vtune rl2wof -delay` now enters delay mode again on hardware. The earlier false-positive and always-delay regressions were fixed by restoring tune-like `CLIARGS` substring handling.
@@ -127,6 +144,19 @@ Validation:
 - `ATTACK.PT3` now plays on hardware.
 - `RL2WOF.PT3` and `RL2WOFTS.PT3` continue to play.
 
+## TurboSound postmortem (v0.0.131–v0.0.135)
+
+`RL2WOFTS.PT3` (packed dual PT3) regressed after Bulba integration. Several independent defects stacked:
+
+1. **Wrong chip-2 Coleco ports** — fallback used swapped RSEL/RDAT vs tune/RomWBW (`$50/$51` standard).
+2. **Shared `VT_/NT_` workspace** — `TS_PLAYQUARK` switched channel state but not unpacked tables; caused garbled audio until per-chip `TS_CTX1/2_VTNT` save/restore was added.
+3. **False dual-hardware** — `TS_DUALHW` could be set without distinct data ports; gated with `TS_VERIFY_DUAL_PORTS`.
+4. **Exit stack corruption** — Bulba `LoopChecker` + `CHECKLP` `POP` (loop disabled) removed return addresses during playback; Esc exit then hit spurious parse errors and skipped mute. Fixed by `LoopChecker=0`, mute-before-BDOS, `BDOS` fn 0 exit, `FLUSH_KEYS`.
+5. **Exit mute on chip 2** — `PSG_MUTE_DIRECT` only touched MSX `$A0/$A1`; Coleco chip kept sustaining. Fixed with `TS_MUTE_BOTH_HARDWARE` on configured port pairs.
+
+Validation (MSX, delay mode):
+- `vtune rl2wofts` — audible dual-chip playback; Esc → silent, single `Exiting.`, clean CCP return (v0.0.135).
+
 ## Rejected / do not reintroduce
 
 - **Unbounded `$81` scan** when `$0080=0` — false `-DELAY` in page-zero garbage → always delay (v0.0.103).
@@ -153,9 +183,10 @@ Validation:
 - [x] **v0.0.114 cleanup:** Removed startup debug markers/pause prompts used for pop isolation.
 - [x] **Hardware v0.0.124:** Vortex-family PT3 playback fixed; `ATTACK.PT3` now plays.
 - [x] **Hardware v0.0.124:** `vtune -list` scans and autostarts playlist playback; `N`/`P` navigation works.
-- [ ] Fix delay-mode speed/sync/fuzz.
+- [x] **Hardware v0.0.131–135:** TurboSound `rl2wofts` on MSX — playback and clean Esc exit verified.
+- [ ] TurboSound delay-mode tempo on MSX (still slow; shared with tune.com delay path).
+- [ ] Fix delay-mode speed/sync/fuzz (single-chip).
 - [ ] Pop / `-list` whine (safer than v0.0.90).
-- [ ] PT3 metadata; interactive `-list`; TurboSound (`rl2wofts`).
 
 ## Key files
 

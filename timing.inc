@@ -1,5 +1,5 @@
 ;
-; Quark timing — same model as tune.com / timing.inc (20 ms target per quark).
+; Quark timing
 ; WAITQ uses HBIOS timer when available, else CPU-calibrated delay loop (40 T-states/iter).
 ;
 
@@ -45,6 +45,34 @@ APPLY_ENGINE_QDLY_ADJ:
 APPLY_QDLY_SUB:
 	OR	A
 	SBC	HL, DE
+	JR	NC, APPLY_QDLY_CHK_TS
+	XOR	A
+	LD	H, A
+	LD	L, A
+APPLY_QDLY_CHK_TS:
+	; TurboSound in delay mode plays two quarks per frame; subtract another
+	; 185 loops (~7400 T-states) to offset the second PLAY/ROUT pass.
+	; Timer mode needs no adjustment (same as tune.com TS_ADJTIM).
+	LD	A, (FILE_ENGINE)
+	CP	ENGINE_PTX
+	JR	NZ, APPLY_QDLY_DONE
+	LD	A, (TSFLAG)
+	OR	A
+	JR	Z, APPLY_QDLY_DONE
+	LD	A, (TS_DUALHW)
+	OR	A
+	JR	Z, APPLY_QDLY_DONE
+	LD	A, (WMOD)
+	OR	A
+	JR	NZ, APPLY_QDLY_DONE
+	LD	DE, 185
+	OR	A
+	SBC	HL, DE
+	JR	NC, APPLY_QDLY_DONE
+	XOR	A
+	LD	H, A
+	LD	L, A
+APPLY_QDLY_DONE:
 	LD	(QDLY), HL
 	RET
 

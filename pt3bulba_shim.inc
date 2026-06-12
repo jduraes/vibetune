@@ -7,7 +7,7 @@ CPUFAMZ180	.EQU	1
 SBCV2004	.EQU	0
 CurPosCounter	.EQU	0
 ACBBAC		.EQU	0
-LoopChecker	.EQU	1
+LoopChecker	.EQU	0	; CHECKLP POP corrupts stack when loop disabled (bit0=0)
 Id		.EQU	0
 
 #DEFINE MDLADDR MUSIC_BUF
