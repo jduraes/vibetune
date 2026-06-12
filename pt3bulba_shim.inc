@@ -7,7 +7,9 @@ CPUFAMZ180	.EQU	1
 SBCV2004	.EQU	0
 CurPosCounter	.EQU	0
 ACBBAC		.EQU	0
-LoopChecker	.EQU	0	; CHECKLP POP corrupts stack when loop disabled (bit0=0)
+LoopChecker	.EQU	1	; SETUP bit7 = song ended; bit0=0 avoids CHECKLP POP (host loops via L)
+; SETUP bit0=1 disables Bulba internal loop (PTxPlay.txt); host sets before INIT.
+BULBA_SETUP_INIT	.EQU	1
 Id		.EQU	0
 
 #DEFINE MDLADDR MUSIC_BUF

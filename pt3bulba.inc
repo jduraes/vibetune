@@ -81,6 +81,8 @@ CurPos	.DB 0 ;for visualization only (i.e. no need for playing)
 	.IF LoopChecker
 CHECKLP	LD HL,SETUP
 	SET 7,(HL)
+	LD A,1
+	LD (PTX_DONE),A
 	BIT 0,(HL)
 	RET Z
 	POP HL

@@ -116,6 +116,8 @@ TS_ADJ2:
 	LD	(QDLY), HL
 	RET
 
+; Tempo/QDLY calibration printout — enable with .IF 1 and uncomment CALL sites in vibetune.asm.
+.IF 0
 PRINT_TIMING_DEBUG:
 	CALL	CRLF
 	LD	DE, MSG_DBG_CPU
@@ -150,6 +152,7 @@ PRINT_TIMING_DEBUG:
 	LD	A, (WMOD)
 	CALL	PRINT_DEC_BYTE
 	JP	CRLF
+.ENDIF
 
 PRINT_TIMING_MODE:
 	LD	A, (WMOD)
