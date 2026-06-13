@@ -2544,6 +2544,7 @@ MYM_TICK_STOP:
 ; Each iteration: tick engine, poll key, dispatch action, frame delay.
 ; Exits when PLAY_STOPPED and no restart needed, or on quit.
 MAIN_LOOP:
+	CALL	FORCED_DLY_FRAME_BEGIN
 	CALL	PLAYBACK_TICK
 
 	; Non-blocking key poll (same as tune.com: BDOS 06h direct, E=FF).
@@ -2582,6 +2583,7 @@ MAIN_LOOP:
 	JP	MAIN_LOOP_NODELAY
 
 MAIN_QUIT:
+	CALL	FORCED_DLY_FRAME_END
 	CALL	FLUSH_KEYS
 	JP	START_EXIT
 
@@ -2649,6 +2651,7 @@ MAIN_LOOP_TOGGLE_OK:
 MAIN_LOOP_NODELAY:
 	CALL	WAITQ
 	CALL	PRINT_DEFERRED_STATUS
+	CALL	FORCED_DLY_FRAME_END
 
 	; Check if stopped: handle loop/next logic
 	LD	A, (PLAY_STATE)
@@ -2676,6 +2679,7 @@ MAIN_PLAYLIST_OK:
 	JP	MAIN_RELOAD_TRACK
 
 MAIN_LOOP_END:
+	CALL	FORCED_DLY_FRAME_END
 	CALL	FLUSH_KEYS
 	JP	START_EXIT
 
@@ -2742,6 +2746,7 @@ MAIN_RELOAD_DIRECT:
 ; Reload the track selected by TRACK_SELECTED from TRACK_LIST.
 ; Rebuilds FCB_WORK from the track name, reinits engine, re-enters main loop.
 MAIN_RELOAD_TRACK:
+	CALL	FORCED_DLY_FRAME_END
 	CALL	COPY_SELECTED_TRACK_TO_ARG
 	CALL	CLASSIFY_ARG_EXTENSION
 	OR	A
@@ -3789,6 +3794,10 @@ MSG_DBG_APPLY:
 	.DB	"  apply# (hex): ", 0
 MSG_DBG_FLAGS:
 	.DB	"  flags eng/ts/dual/wmod (dec): ", 0
+MSG_DBG_PLT:
+	.DB	"  platform (dec): ", 0
+MSG_DBG_FDLY:
+	.DB	"  forced-dly-hwtimer (dec): ", 0
 MSG_ERR_NO_ARG:
 	.DB	"Error: missing file argument.", 0
 MSG_ERR_TOO_MANY:
@@ -3806,7 +3815,7 @@ MSG_ERR_INVALID_DATA:
 MSG_ERR_ENGINE_INIT:
 	.DB	"Error: engine initialization failed.", 0
 MSG_EXITING:
-	.DB	"Exiting.", 0
+	.DB	"Done...", 0
 
 ; Milestone 9: Hardware configuration strings and descriptions
 HW_DESC_UNKNOWN:
@@ -3889,6 +3898,8 @@ APPLY_COUNT:
 WMOD:
 	.DB	0
 DELAYMD:
+	.DB	0
+FORCED_DLY_HWTIMER:
 	.DB	0
 HW_CONFIG_DESC:
 	.DW	HW_DESC_UNKNOWN
