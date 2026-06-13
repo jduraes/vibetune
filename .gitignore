@@ -10,3 +10,9 @@
 
 # SIMH sync marker
 .simh-sync.stamp
+
+# Miscellaneous
+HANDOVER.md
+archive
+scripts
+TestVectors
