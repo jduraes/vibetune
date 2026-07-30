@@ -1,7 +1,7 @@
 ;===============================================================================
 ; uian.inc — ANSI/VT100 playlist UI for VibeTune
 ;
-; Ported from VibeTune-old (SHOWPLSTATUS / UI_* / TCFG_* blocks) and adapted to
+; Ported from the old VibeTune (SHOWPLSTATUS / UI_* / TCFG_* blocks) and adapted to
 ; the current TRACK_LIST storage (13-byte NUL-terminated "NAME.EXT" entries).
 ; All routines are no-ops when UI_ACTIVE = 0. UI_ACTIVE is set by UI_SETUP:
 ; RUN_MODE = RUNMODE_LIST and (DISP_MODE <> plain or ANSI-colour flag set).
