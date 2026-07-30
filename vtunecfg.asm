@@ -1,5 +1,20 @@
 ;===============================================================================
-; VTUNECFG - display configuration writer for VibeTune
+; VTUNECFG - display configuration utility for VibeTune
+;
+; Writes VTUNE.CFG (128-byte record, first 5 bytes used):
+;   byte 0: magic = $A5
+;   byte 1: term type (0=plain, 1=VTxxx, 2=ANSI)  -- vtune.com DISP_MODE
+;   byte 2: flags (bit 0 = ANSI colour)
+;   byte 3: rows (0 -> default 24)
+;   byte 4: cols (0 -> default 80)
+;
+; vtune.com reads only bytes 0-1; bytes 2-4 are forward-compatible extensions
+; (same semantics as the old TERM.CFG layout used by the -config mode).
+;
+; Usage: VTUNECFG                interactive configuration (old -config UI)
+;        VTUNECFG plain|vt100|ansi|0|1|2   one-shot term type change
+;        VTUNECFG show            print current settings
+;        VTUNECFG verify          write+read+compare roundtrip check
 ;===============================================================================
 
 #include "../RomWBW/Source/ver.inc"
@@ -7,14 +22,28 @@
 #include "vtversion.inc"
 
 #DEFINE CFG_MAGIC $A5
-#DEFINE MODE_PLAIN 0
-#DEFINE MODE_VT100 1
-#DEFINE MODE_ANSI  2
+
+#DEFINE TERM_PLAIN 0
+#DEFINE TERM_VT    1
+#DEFINE TERM_ANSI  2
+
+#DEFINE CFGF_ANSI  $01
+
+#DEFINE CFG_MIN_ROWS 8
+#DEFINE CFG_MAX_ROWS 50
+#DEFINE CFG_MIN_COLS 20
+#DEFINE CFG_MAX_COLS 150
+#DEFINE CFG_DFL_ROWS 24
+#DEFINE CFG_DFL_COLS 80
+
+#DEFINE TCFG_ORG_ROW 5
+#DEFINE TCFG_ORG_COL 5
 
 #DEFINE ERR_OK      0
 #DEFINE ERR_NO_ARG  1
 #DEFINE ERR_BAD_ARG 2
 #DEFINE ERR_VERIFY  3
+#DEFINE ERR_SHOW    4
 
 #DEFINE CFGSTAT_OK      0
 #DEFINE CFGSTAT_MISSING 1
@@ -30,18 +59,44 @@ START:
 
 	CALL	PARSE_MODE_ARG
 	OR	A
-	JP	Z, START_WRITE
+	JP	Z, START_ONESHOT
 	CP	ERR_VERIFY
 	JP	Z, START_VERIFY
 	CP	ERR_NO_ARG
+	JP	Z, START_INTERACTIVE
+	CP	ERR_SHOW
 	JP	Z, START_SHOW
 	LD	DE, MSG_ERR_BAD_ARG
 	CALL	PRTSTR
 	CALL	CRLF
-	JP	START_USAGE
+	LD	DE, MSG_USAGE
+	CALL	PRTSTR
+	CALL	CRLF
+	JP	START_EXIT
 
+;-------------------------------------------------------------------------------
+; One-shot: VTUNECFG plain|vt100|ansi|0|1|2 -- set term type, keep other fields
+;-------------------------------------------------------------------------------
+START_ONESHOT:
+	CALL	CFG_LOAD
+	LD	A, (ARG_TERM)
+	LD	(CFG_TERM), A
+	CALL	CFG_SAVE
+	OR	A
+	JP	NZ, START_WRITE_FAIL
+
+	LD	DE, MSG_OK_PREFIX
+	CALL	PRTSTR
+	LD	A, (CFG_TERM)
+	CALL	PRINT_TERM_NAME
+	CALL	CRLF
+	JP	START_EXIT
+
+;-------------------------------------------------------------------------------
+; show: print current settings
+;-------------------------------------------------------------------------------
 START_SHOW:
-	CALL	LOAD_CFG_MODE
+	CALL	CFG_LOAD
 	OR	A
 	JR	Z, START_SHOW_PRINT
 	CP	CFGSTAT_MISSING
@@ -49,68 +104,47 @@ START_SHOW:
 	LD	DE, MSG_SHOW_MISSING
 	CALL	PRTSTR
 	CALL	CRLF
-	JR	START_SHOW_DEFAULT
+	JR	START_SHOW_PRINT
 
 START_SHOW_INVALID:
 	LD	DE, MSG_SHOW_INVALID
 	CALL	PRTSTR
 	CALL	CRLF
 
-START_SHOW_DEFAULT:
-	XOR	A
-	LD	(CFG_MODE), A
-
 START_SHOW_PRINT:
-	LD	DE, MSG_SHOW_PREFIX
-	CALL	PRTSTR
-	LD	A, (CFG_MODE)
-	CALL	PRINT_MODE_NAME
+	CALL	TCFG_PRINT_SUMMARY
 	CALL	CRLF
 	JP	START_EXIT
 
-START_USAGE:
-	LD	DE, MSG_USAGE
-	CALL	PRTSTR
-	CALL	CRLF
-	JP	START_EXIT
-
-START_WRITE:
-	CALL	CFG_WRITE_FROM_MODE
-	OR	A
-	JP	NZ, START_WRITE_FAIL
-
-	LD	DE, MSG_OK_PREFIX
-	CALL	PRTSTR
-	LD	A, (CFG_MODE)
-	CALL	PRINT_MODE_NAME
-	CALL	CRLF
-	JP	START_EXIT
-
+;-------------------------------------------------------------------------------
+; verify: full-record write + read + compare roundtrip
+;-------------------------------------------------------------------------------
 START_VERIFY:
-	; Determine baseline mode for roundtrip check.
-	CALL	LOAD_CFG_MODE
-	OR	A
-	JR	Z, START_VERIFY_HAVE_MODE
-	XOR	A
-	LD	(CFG_MODE), A
+	CALL	CFG_LOAD
 
-START_VERIFY_HAVE_MODE:
-	LD	A, (CFG_MODE)
-	LD	(BEFORE_MODE), A
+	LD	HL, CFG_TERM
+	LD	DE, BEFORE_TERM
+	LD	BC, 4
+	LDIR
 
-	CALL	CFG_WRITE_FROM_MODE
+	CALL	CFG_SAVE
 	OR	A
 	JR	NZ, START_VERIFY_FAIL
 
-	CALL	LOAD_CFG_MODE
+	CALL	CFG_LOAD
 	OR	A
 	JR	NZ, START_VERIFY_FAIL
 
-	LD	A, (CFG_MODE)
-	LD	B, A
-	LD	A, (BEFORE_MODE)
-	CP	B
+	LD	HL, CFG_TERM
+	LD	DE, BEFORE_TERM
+	LD	B, 4
+START_VERIFY_CMP:
+	LD	A, (DE)
+	CP	(HL)
 	JR	NZ, START_VERIFY_FAIL
+	INC	HL
+	INC	DE
+	DJNZ	START_VERIFY_CMP
 
 	LD	DE, MSG_VERIFY_OK
 	CALL	PRTSTR
@@ -123,26 +157,177 @@ START_VERIFY_FAIL:
 	CALL	CRLF
 	JP	START_EXIT
 
-CFG_WRITE_FROM_MODE:
+;-------------------------------------------------------------------------------
+; Interactive configuration (port of the old vtune -config UI)
+;-------------------------------------------------------------------------------
+START_INTERACTIVE:
+	CALL	CFG_LOAD
+	LD	(CFG_LOAD_STAT), A
+
+	CALL	FLUSHKEYS
+	CALL	TCFG_CLRHOME
+	CALL	TCFG_COL_HDR
+	LD	DE, MSG_CFGMODE
+	CALL	PRTSTR
+	CALL	TCFG_COL_RST
+	CALL	CRLF2
+
+	LD	A, (CFG_LOAD_STAT)
+	OR	A
+	JR	Z, START_INT_FOUND
+	CP	CFGSTAT_MISSING
+	JR	NZ, START_INT_INVALID
+	LD	DE, MSG_CFGDEFAULT
+	JR	START_INT_STATUS
+START_INT_INVALID:
+	LD	DE, MSG_CFGINVALID
+	JR	START_INT_STATUS
+START_INT_FOUND:
+	LD	DE, MSG_CFGFOUND
+START_INT_STATUS:
+	CALL	PRTSTR
+	CALL	CRLF
+	CALL	TCFG_PRINT_SUMMARY
+	CALL	CRLF2
+
+	CALL	TCFG_ASK_TERM
+	CALL	TCFG_ASK_ANSI
+
+	LD	A, (CFG_TERM)
+	OR	A
+	JR	NZ, START_INT_TUNE
+	LD	A, (CFG_FLAGS)
+	AND	CFGF_ANSI
+	JR	Z, START_INT_SAVE
+START_INT_TUNE:
+	CALL	TCFG_SIZE_TUNE
+
+START_INT_SAVE:
+	CALL	CFG_SAVE
+	OR	A
+	JP	NZ, START_WRITE_FAIL
+	CALL	TCFG_CLRHOME
+	CALL	TCFG_COL_OK
+	LD	DE, MSG_CFGSAVED
+	CALL	PRTSTR
+	CALL	TCFG_COL_RST
+	CALL	CRLF
+	CALL	TCFG_PRINT_SUMMARY
+	CALL	CRLF2
+	CALL	FLUSHKEYS
+	JP	START_EXIT
+
+START_WRITE_FAIL:
+	LD	DE, MSG_ERR_WRITE
+	CALL	PRTSTR
+	CALL	CRLF
+
+START_EXIT:
+	; Restore default CP/M DMA before returning.
+	LD	DE, $0080
+	LD	C, $1A
+	CALL	BDOS
+	RET
+
+;===============================================================================
+; Config file load/save
+;===============================================================================
+
+CFG_DEFAULTS:
+	XOR	A
+	LD	(CFG_TERM), A
+	LD	(CFG_FLAGS), A
+	LD	A, CFG_DFL_ROWS
+	LD	(CFG_ROWS), A
+	LD	A, CFG_DFL_COLS
+	LD	(CFG_COLS), A
+	RET
+
+; Load VTUNE.CFG into CFG_TERM/FLAGS/ROWS/COLS (defaults preloaded).
+; Returns A=CFGSTAT_OK, CFGSTAT_MISSING, CFGSTAT_INVALID.
+CFG_LOAD:
+	CALL	CFG_DEFAULTS
+	CALL	BUILD_CFG_FCB
+	LD	DE, DMA_BUFFER
+	LD	C, $1A
+	CALL	BDOS
+	LD	DE, CFG_FCB
+	LD	C, $0F
+	CALL	BDOS
+	CP	$FF
+	JR	Z, CFG_LOAD_MISSING
+	LD	DE, CFG_FCB
+	LD	C, $14
+	CALL	BDOS
+	OR	A
+	JR	NZ, CFG_LOAD_INVALID
+	LD	A, (DMA_BUFFER)
+	CP	CFG_MAGIC
+	JR	NZ, CFG_LOAD_INVALID
+
+	LD	A, (DMA_BUFFER+1)
+	CP	3
+	JR	C, CFG_LOAD_TERM_OK
+	XOR	A
+CFG_LOAD_TERM_OK:
+	LD	(CFG_TERM), A
+	LD	A, (DMA_BUFFER+2)
+	AND	CFGF_ANSI
+	LD	(CFG_FLAGS), A
+	LD	A, (DMA_BUFFER+3)
+	OR	A
+	JR	NZ, CFG_LOAD_ROWS_OK
+	LD	A, CFG_DFL_ROWS
+CFG_LOAD_ROWS_OK:
+	LD	(CFG_ROWS), A
+	LD	A, (DMA_BUFFER+4)
+	OR	A
+	JR	NZ, CFG_LOAD_COLS_OK
+	LD	A, CFG_DFL_COLS
+CFG_LOAD_COLS_OK:
+	LD	(CFG_COLS), A
+
+	LD	DE, CFG_FCB
+	LD	C, $10
+	CALL	BDOS
+	LD	A, CFGSTAT_OK
+	RET
+
+CFG_LOAD_INVALID:
+	LD	DE, CFG_FCB
+	LD	C, $10
+	CALL	BDOS
+	LD	A, CFGSTAT_INVALID
+	RET
+
+CFG_LOAD_MISSING:
+	LD	A, CFGSTAT_MISSING
+	RET
+
+; Write CFG_TERM/FLAGS/ROWS/COLS to VTUNE.CFG. Returns A=0 ok, A=1 fail.
+CFG_SAVE:
 	CALL	BUILD_CFG_FCB
 
-	; Prepare one DMA record (128 bytes), only first 3 bytes are used by vtune.
+	; Prepare one DMA record (128 bytes), first 5 bytes used.
 	LD	HL, DMA_BUFFER
 	LD	B, 128
-CFG_CLR_DMA:
+CFG_SAVE_CLR:
 	XOR	A
 	LD	(HL), A
 	INC	HL
-	DJNZ	CFG_CLR_DMA
+	DJNZ	CFG_SAVE_CLR
 
 	LD	A, CFG_MAGIC
 	LD	(DMA_BUFFER), A
-	LD	A, (CFG_MODE)
+	LD	A, (CFG_TERM)
 	LD	(DMA_BUFFER+1), A
-	XOR	A
+	LD	A, (CFG_FLAGS)
 	LD	(DMA_BUFFER+2), A
+	LD	A, (CFG_ROWS)
+	LD	(DMA_BUFFER+3), A
+	LD	A, (CFG_COLS)
+	LD	(DMA_BUFFER+4), A
 
-	; Set DMA source for sequential write.
 	LD	DE, DMA_BUFFER
 	LD	C, $1A
 	CALL	BDOS
@@ -157,14 +342,14 @@ CFG_CLR_DMA:
 	LD	C, $16
 	CALL	BDOS
 	CP	$FF
-	JR	Z, CFG_WRITE_FAIL
+	JR	Z, CFG_SAVE_FAIL
 
 	; Write one 128-byte record.
 	LD	DE, CFG_FCB
 	LD	C, $15
 	CALL	BDOS
 	OR	A
-	JR	NZ, CFG_WRITE_FAIL
+	JR	NZ, CFG_SAVE_FAIL
 
 	; Close file.
 	LD	DE, CFG_FCB
@@ -173,69 +358,929 @@ CFG_CLR_DMA:
 	XOR	A
 	RET
 
-CFG_WRITE_FAIL:
+CFG_SAVE_FAIL:
 	LD	DE, CFG_FCB
 	LD	C, $10
 	CALL	BDOS
 	LD	A, 1
 	RET
 
-START_WRITE_FAIL:
-	LD	DE, MSG_ERR_WRITE
+; Build FCB for VTUNE.CFG in CFG_FCB.
+BUILD_CFG_FCB:
+	LD	HL, CFG_FCB
+	LD	B, 36
+BUILD_CFG_CLR:
+	XOR	A
+	LD	(HL), A
+	INC	HL
+	DJNZ	BUILD_CFG_CLR
+
+	LD	HL, CFG_FCB+1
+	LD	DE, CFG_NAME
+	LD	B, 11
+BUILD_CFG_NAME:
+	LD	A, (DE)
+	LD	(HL), A
+	INC	HL
+	INC	DE
+	DJNZ	BUILD_CFG_NAME
+	RET
+
+;===============================================================================
+; Interactive configuration UI (port of old vtune -config / termcfg code)
+;===============================================================================
+
+TCFG_PRINT_SUMMARY:
+	LD	DE, MSG_CFGTERM
+	CALL	PRTSTR
+	LD	A, (CFG_TERM)
+	CALL	PRINT_TERM_NAME
+	CALL	CRLF
+	LD	DE, MSG_CFGANSI
+	CALL	PRTSTR
+	LD	A, (CFG_FLAGS)
+	AND	CFGF_ANSI
+	LD	DE, MSG_NO
+	JR	Z, TCFG_SUMMARY0
+	LD	DE, MSG_YES
+TCFG_SUMMARY0:
 	CALL	PRTSTR
 	CALL	CRLF
-
-START_EXIT:
-	; Restore default CP/M DMA before returning.
-	LD	DE, $0080
-	LD	C, $1A
-	CALL	BDOS
+	LD	DE, MSG_CFGSIZE
+	CALL	PRTSTR
+	LD	A, (CFG_COLS)
+	CALL	PRTDECB
+	LD	A, ' '
+	CALL	PRTCHR
+	LD	A, 'x'
+	CALL	PRTCHR
+	LD	A, ' '
+	CALL	PRTCHR
+	LD	A, (CFG_ROWS)
+	CALL	PRTDECB
 	RET
 
-; Load and validate VTUNE.CFG into CFG_MODE.
-; Returns A=CFGSTAT_OK, CFGSTAT_MISSING, CFGSTAT_INVALID.
-LOAD_CFG_MODE:
-	CALL	BUILD_CFG_FCB
-	LD	DE, DMA_BUFFER
-	LD	C, $1A
-	CALL	BDOS
-	LD	DE, CFG_FCB
-	LD	C, $0F
-	CALL	BDOS
-	CP	$FF
-	JR	Z, LOAD_CFG_MISSING
-	LD	DE, CFG_FCB
-	LD	C, $14
-	CALL	BDOS
+PRINT_TERM_NAME:
+	CP	TERM_VT
+	JR	Z, PRINT_TERM_VT
+	CP	TERM_ANSI
+	JR	Z, PRINT_TERM_ANSI
+	LD	DE, MSG_TERM_PLAIN
+	JP	PRTSTR
+PRINT_TERM_VT:
+	LD	DE, MSG_TERM_VT
+	JP	PRTSTR
+PRINT_TERM_ANSI:
+	LD	DE, MSG_TERM_ANSI
+	JP	PRTSTR
+
+TCFG_ASK_TERM:
+TCFG_ASK_TERM0:
+	CALL	TCFG_COL_PRM
+	LD	DE, MSG_TERMMENU
+	CALL	PRTSTR
+	CALL	CRLF
+	LD	DE, MSG_TERMPROMPT
+	CALL	PRTSTR
+	LD	A, (CFG_TERM)
+	CALL	PRINT_TERM_NAME
+	LD	DE, MSG_PROMPTEND
+	CALL	PRTSTR
+	CALL	TCFG_COL_RST
+	CALL	TCFG_GETCH
+	CP	13
+	JR	Z, TCFG_ASK_TERM_KEEP
+	PUSH	AF
+	CALL	PRTCHR
+	CALL	CRLF
+	POP	AF
+	CALL	TO_UPPER
+	CP	'P'
+	JR	Z, TCFG_ASK_TERM_PLAIN
+	CP	'V'
+	JR	Z, TCFG_ASK_TERM_VT
+	CP	'A'
+	JR	Z, TCFG_ASK_TERM_ANSI
+	JR	TCFG_ASK_TERM0
+TCFG_ASK_TERM_KEEP:
+	CALL	CRLF
+	RET
+TCFG_ASK_TERM_PLAIN:
+	XOR	A
+	LD	(CFG_TERM), A
+	RET
+TCFG_ASK_TERM_VT:
+	LD	A, TERM_VT
+	LD	(CFG_TERM), A
+	RET
+TCFG_ASK_TERM_ANSI:
+	LD	A, TERM_ANSI
+	LD	(CFG_TERM), A
+	RET
+
+TCFG_ASK_ANSI:
+TCFG_ASK_ANSI0:
+	CALL	TCFG_COL_PRM
+	LD	DE, MSG_ANSIPROMPT
+	CALL	PRTSTR
+	LD	A, (CFG_FLAGS)
+	AND	CFGF_ANSI
+	LD	DE, MSG_NO
+	JR	Z, TCFG_ASK_ANSI1
+	LD	DE, MSG_YES
+TCFG_ASK_ANSI1:
+	CALL	PRTSTR
+	LD	DE, MSG_PROMPTEND
+	CALL	PRTSTR
+	CALL	TCFG_COL_RST
+	CALL	TCFG_GETCH
+	CP	13
+	JR	Z, TCFG_ASK_ANSI_KEEP
+	PUSH	AF
+	CALL	PRTCHR
+	CALL	CRLF
+	POP	AF
+	CALL	TO_UPPER
+	CP	'Y'
+	JR	Z, TCFG_ASK_ANSI_YES
+	CP	'N'
+	JR	Z, TCFG_ASK_ANSI_NO
+	JR	TCFG_ASK_ANSI0
+TCFG_ASK_ANSI_KEEP:
+	CALL	CRLF
+	RET
+TCFG_ASK_ANSI_YES:
+	LD	A, (CFG_FLAGS)
+	OR	CFGF_ANSI
+	LD	(CFG_FLAGS), A
+	RET
+TCFG_ASK_ANSI_NO:
+	LD	A, (CFG_FLAGS)
+	AND	$FF-CFGF_ANSI
+	LD	(CFG_FLAGS), A
+	RET
+
+;-------------------------------------------------------------------------------
+; Interactive screen size tuning grid
+;-------------------------------------------------------------------------------
+
+TCFG_SIZE_TUNE:
+	CALL	TCFG_CLRHOME
+	LD	DE, MSG_TUNETITLE
+	CALL	PRTSTR
+	CALL	CRLF
+	LD	DE, MSG_TUNEKEYS
+	CALL	PRTSTR
+	CALL	CRLF
+	XOR	A
+	LD	(TCFG_PREV_COLS), A
+	LD	(TCFG_PREV_ROWS), A
+	CALL	TCFG_SIZE_REFRESH
+
+	LD	B, 4
+	LD	C, 1
+	CALL	TCFG_ANSI_AT
+TCFG_SIZE_TUNE0:
+	LD	B, 4
+	LD	C, 1
+	CALL	TCFG_ANSI_AT
+	CALL	TCFG_SIZE_GETKEY
+	CP	27
+	JP	Z, TCFG_SIZE_EXIT
+	CP	'a'
+	JP	Z, TCFG_SIZE_COL_DEC
+	CP	'd'
+	JP	Z, TCFG_SIZE_COL_INC
+	CP	'w'
+	JP	Z, TCFG_SIZE_ROW_DEC
+	CP	's'
+	JP	Z, TCFG_SIZE_ROW_INC
+	JP	TCFG_SIZE_TUNE0
+
+TCFG_SIZE_GETKEY:
+	CALL	TCFG_GETCH
+	CP	27
+	RET	NZ
+	CALL	TCFG_GETCH_TO
 	OR	A
-	JR	NZ, LOAD_CFG_INVALID_CLOSE
-	LD	A, (DMA_BUFFER)
-	CP	CFG_MAGIC
-	JR	NZ, LOAD_CFG_INVALID_CLOSE
-	LD	A, (DMA_BUFFER+1)
-	CP	MODE_ANSI + 1
-	JR	NC, LOAD_CFG_INVALID_CLOSE
-	LD	(CFG_MODE), A
-	LD	DE, CFG_FCB
-	LD	C, $10
-	CALL	BDOS
-	LD	A, CFGSTAT_OK
+	JR	Z, TCFG_SIZE_GETKEY_ESC
+	CP	'['
+	JR	Z, TCFG_SIZE_GETKEY_SEQ
+	CP	'O'
+	JR	Z, TCFG_SIZE_GETKEY_SEQ
+	LD	A, 27
 	RET
 
-LOAD_CFG_INVALID_CLOSE:
-	LD	DE, CFG_FCB
-	LD	C, $10
-	CALL	BDOS
-	LD	A, CFGSTAT_INVALID
+TCFG_SIZE_GETKEY_SEQ:
+TCFG_SIZE_GETKEY_SEQ0:
+	CALL	TCFG_GETCH_TO
+	OR	A
+	JR	Z, TCFG_SIZE_GETKEY_ESC
+	CP	'0'
+	JR	C, TCFG_SIZE_GETKEY_SEQ1
+	CP	$3A
+	JR	C, TCFG_SIZE_GETKEY_SEQ0
+	CP	$3B
+	JR	Z, TCFG_SIZE_GETKEY_SEQ0
+	CP	$3F
+	JR	Z, TCFG_SIZE_GETKEY_SEQ0
+
+TCFG_SIZE_GETKEY_SEQ1:
+	CP	'A'
+	JR	Z, TCFG_SIZE_GETKEY_UP
+	CP	'B'
+	JR	Z, TCFG_SIZE_GETKEY_DOWN
+	CP	'C'
+	JR	Z, TCFG_SIZE_GETKEY_RIGHT
+	CP	'D'
+	JR	Z, TCFG_SIZE_GETKEY_LEFT
+	CP	$40
+	JR	C, TCFG_SIZE_GETKEY_SEQ0
+	CP	$7F
+	JR	C, TCFG_SIZE_GETKEY_NONE
+	JR	TCFG_SIZE_GETKEY_SEQ0
+
+TCFG_SIZE_GETKEY_NONE:
+	XOR	A
 	RET
 
-LOAD_CFG_MISSING:
-	LD	A, CFGSTAT_MISSING
+TCFG_SIZE_GETKEY_UP:
+	LD	A, 'w'
 	RET
 
-; Parse one mode token from command tail.
-; Supported values (case-insensitive): PLAIN/0, VT100/1, ANSI/2
-; Returns A=ERR_OK and sets CFG_MODE on success.
+TCFG_SIZE_GETKEY_DOWN:
+	LD	A, 's'
+	RET
+
+TCFG_SIZE_GETKEY_RIGHT:
+	LD	A, 'd'
+	RET
+
+TCFG_SIZE_GETKEY_LEFT:
+	LD	A, 'a'
+	RET
+
+TCFG_SIZE_GETKEY_ESC:
+	LD	A, 27
+	RET
+
+TCFG_GETCH_TO:
+	LD	B, 32
+TCFG_GETCH_TO0:
+	CALL	GETKEY
+	RET	NZ
+	DJNZ	TCFG_GETCH_TO0
+	XOR	A
+	RET
+
+TCFG_SIZE_EXIT:
+	CALL	FLUSHKEYS
+	CALL	TCFG_CLRHOME
+	RET
+
+TCFG_SIZE_COL_DEC:
+	LD	A, (CFG_COLS)
+	CP	CFG_MIN_COLS
+	JP	Z, TCFG_SIZE_TUNE0
+	CALL	TCFG_SIZE_SNAPSHOT
+	LD	A, (CFG_COLS)
+	DEC	A
+	LD	(CFG_COLS), A
+	CALL	TCFG_SIZE_REFRESH
+	JP	TCFG_SIZE_TUNE0
+
+TCFG_SIZE_COL_INC:
+	LD	A, (CFG_COLS)
+	CP	CFG_MAX_COLS
+	JP	Z, TCFG_SIZE_TUNE0
+	CALL	TCFG_SIZE_SNAPSHOT
+	LD	A, (CFG_COLS)
+	INC	A
+	LD	(CFG_COLS), A
+	CALL	TCFG_SIZE_REFRESH
+	JP	TCFG_SIZE_TUNE0
+
+TCFG_SIZE_ROW_DEC:
+	LD	A, (CFG_ROWS)
+	CP	CFG_MIN_ROWS
+	JP	Z, TCFG_SIZE_TUNE0
+	CALL	TCFG_SIZE_SNAPSHOT
+	LD	A, (CFG_ROWS)
+	DEC	A
+	LD	(CFG_ROWS), A
+	CALL	TCFG_SIZE_REFRESH
+	JP	TCFG_SIZE_TUNE0
+
+TCFG_SIZE_ROW_INC:
+	LD	A, (CFG_ROWS)
+	CP	CFG_MAX_ROWS
+	JP	Z, TCFG_SIZE_TUNE0
+	CALL	TCFG_SIZE_SNAPSHOT
+	LD	A, (CFG_ROWS)
+	INC	A
+	LD	(CFG_ROWS), A
+	CALL	TCFG_SIZE_REFRESH
+	JP	TCFG_SIZE_TUNE0
+
+TCFG_SIZE_SNAPSHOT:
+	LD	A, (CFG_COLS)
+	LD	(TCFG_PREV_COLS), A
+	LD	A, (CFG_ROWS)
+	LD	(TCFG_PREV_ROWS), A
+	RET
+
+TCFG_SIZE_REFRESH:
+	CALL	TCFG_SIZE_SHOW_CURR
+	LD	A, (TCFG_PREV_COLS)
+	OR	A
+	JR	Z, TCFG_SIZE_REFRESH0
+	LD	A, (TCFG_PREV_ROWS)
+	OR	A
+	JR	Z, TCFG_SIZE_REFRESH0
+	LD	A, (CFG_COLS)
+	LD	B, A
+	LD	A, (TCFG_PREV_COLS)
+	CP	B
+	CALL	NZ, TCFG_SIZE_UPDATE_COLS
+	LD	A, (CFG_ROWS)
+	LD	B, A
+	LD	A, (TCFG_PREV_ROWS)
+	CP	B
+	CALL	NZ, TCFG_SIZE_UPDATE_ROWS
+	CALL	TCFG_DRAW_SCALES
+	JR	TCFG_SIZE_REFRESH1
+TCFG_SIZE_REFRESH0:
+	CALL	TCFG_DRAW_GRID
+TCFG_SIZE_REFRESH1:
+	CALL	TCFG_SIZE_SNAPSHOT
+	RET
+
+TCFG_SIZE_SHOW_CURR:
+	LD	B, 3
+	LD	C, 1
+	CALL	TCFG_ANSI_AT
+	CALL	TCFG_EL2
+	LD	B, 3
+	LD	C, 1
+	CALL	TCFG_ANSI_AT
+	LD	DE, MSG_TUNECURR
+	CALL	PRTSTR
+	LD	A, (CFG_COLS)
+	CALL	PRTDECB
+	LD	A, ' '
+	CALL	PRTCHR
+	LD	A, 'x'
+	CALL	PRTCHR
+	LD	A, ' '
+	CALL	PRTCHR
+	LD	A, (CFG_ROWS)
+	CALL	PRTDECB
+	LD	DE, MSG_TUNEMAX
+	CALL	PRTSTR
+	RET
+
+TCFG_SIZE_UPDATE_COLS:
+	PUSH	AF
+	PUSH	BC
+	PUSH	DE
+	PUSH	HL
+	LD	A, (TCFG_PREV_COLS)
+	LD	D, A			; old cols
+	LD	A, (CFG_COLS)
+	LD	E, A			; new cols
+	CP	D
+	JR	C, TCFG_SIZE_UCOLS_DEC
+
+	; expanding width: old C becomes '-', new endpoint gets C
+	LD	B, TCFG_ORG_ROW
+	LD	A, D
+	ADD	A, TCFG_ORG_COL - 1
+	LD	C, A
+	CALL	TCFG_ANSI_AT
+	LD	A, '-'
+	CALL	PRTCHR
+
+	LD	A, E
+	CALL	TCFG_SIZE_IS_DECADE
+	JR	Z, TCFG_SIZE_UCOLS_INC0
+	LD	B, TCFG_ORG_ROW - 1
+	LD	A, E
+	ADD	A, TCFG_ORG_COL - 1
+	LD	C, A
+	CALL	TCFG_ANSI_AT
+	LD	A, E
+	CALL	PRTDECB
+TCFG_SIZE_UCOLS_INC0:
+	JR	TCFG_SIZE_UCOLS_SETC
+
+TCFG_SIZE_UCOLS_DEC:
+	; shrinking width: erase old C endpoint, new endpoint gets C
+	LD	B, TCFG_ORG_ROW
+	LD	A, D
+	ADD	A, TCFG_ORG_COL - 1
+	LD	C, A
+	CALL	TCFG_ANSI_AT
+	LD	A, ' '
+	CALL	PRTCHR
+
+	LD	A, D
+	CALL	TCFG_SIZE_IS_DECADE
+	JR	Z, TCFG_SIZE_UCOLS_SETC
+	LD	B, TCFG_ORG_ROW - 1
+	LD	A, D
+	ADD	A, TCFG_ORG_COL - 1
+	LD	C, A
+	CALL	TCFG_ANSI_AT
+	LD	A, ' '
+	CALL	PRTCHR
+	CALL	PRTCHR
+	CALL	PRTCHR
+
+TCFG_SIZE_UCOLS_SETC:
+	LD	B, TCFG_ORG_ROW
+	LD	A, E
+	ADD	A, TCFG_ORG_COL - 1
+	LD	C, A
+	CALL	TCFG_ANSI_AT
+	LD	A, 'C'
+	CALL	PRTCHR
+
+	; move X marker horizontally
+	LD	A, (TCFG_PREV_ROWS)
+	ADD	A, TCFG_ORG_ROW - 1
+	LD	B, A
+	LD	A, D
+	ADD	A, TCFG_ORG_COL - 1
+	LD	C, A
+	CALL	TCFG_ANSI_AT
+	LD	A, ' '
+	CALL	PRTCHR
+	LD	A, (CFG_ROWS)
+	ADD	A, TCFG_ORG_ROW - 1
+	LD	B, A
+	LD	A, E
+	ADD	A, TCFG_ORG_COL - 1
+	LD	C, A
+	CALL	TCFG_ANSI_AT
+	LD	A, 'X'
+	CALL	PRTCHR
+
+	POP	HL
+	POP	DE
+	POP	BC
+	POP	AF
+	RET
+
+TCFG_SIZE_UPDATE_ROWS:
+	PUSH	AF
+	PUSH	BC
+	PUSH	DE
+	PUSH	HL
+	LD	A, (TCFG_PREV_ROWS)
+	LD	D, A			; old rows
+	LD	A, (CFG_ROWS)
+	LD	E, A			; new rows
+	CP	D
+	JR	C, TCFG_SIZE_UROWS_DEC
+
+	; expanding height: old R becomes '|', new endpoint gets R
+	LD	A, D
+	ADD	A, TCFG_ORG_ROW - 1
+	LD	B, A
+	LD	C, TCFG_ORG_COL
+	CALL	TCFG_ANSI_AT
+	LD	A, '|'
+	CALL	PRTCHR
+
+	LD	A, E
+	CALL	TCFG_SIZE_IS_DECADE
+	JR	Z, TCFG_SIZE_UROWS_INC0
+	LD	A, E
+	ADD	A, TCFG_ORG_ROW - 1
+	LD	B, A
+	LD	C, 1
+	CALL	TCFG_ANSI_AT
+	LD	A, E
+	CALL	PRTDECB
+TCFG_SIZE_UROWS_INC0:
+	JR	TCFG_SIZE_UROWS_SETR
+
+TCFG_SIZE_UROWS_DEC:
+	; shrinking height: erase old R endpoint, new endpoint gets R
+	LD	A, D
+	ADD	A, TCFG_ORG_ROW - 1
+	LD	B, A
+	LD	C, TCFG_ORG_COL
+	CALL	TCFG_ANSI_AT
+	LD	A, ' '
+	CALL	PRTCHR
+
+	LD	A, D
+	CALL	TCFG_SIZE_IS_DECADE
+	JR	Z, TCFG_SIZE_UROWS_SETR
+	LD	A, D
+	ADD	A, TCFG_ORG_ROW - 1
+	LD	B, A
+	LD	C, 1
+	CALL	TCFG_ANSI_AT
+	LD	A, ' '
+	CALL	PRTCHR
+	CALL	PRTCHR
+	CALL	PRTCHR
+
+TCFG_SIZE_UROWS_SETR:
+	LD	A, E
+	ADD	A, TCFG_ORG_ROW - 1
+	LD	B, A
+	LD	C, TCFG_ORG_COL
+	CALL	TCFG_ANSI_AT
+	LD	A, 'R'
+	CALL	PRTCHR
+
+	; move X marker vertically
+	LD	A, D
+	ADD	A, TCFG_ORG_ROW - 1
+	LD	B, A
+	LD	A, (TCFG_PREV_COLS)
+	ADD	A, TCFG_ORG_COL - 1
+	LD	C, A
+	CALL	TCFG_ANSI_AT
+	LD	A, ' '
+	CALL	PRTCHR
+	LD	A, E
+	ADD	A, TCFG_ORG_ROW - 1
+	LD	B, A
+	LD	A, (CFG_COLS)
+	ADD	A, TCFG_ORG_COL - 1
+	LD	C, A
+	CALL	TCFG_ANSI_AT
+	LD	A, 'X'
+	CALL	PRTCHR
+
+	POP	HL
+	POP	DE
+	POP	BC
+	POP	AF
+	RET
+
+TCFG_SIZE_IS_DECADE:
+	; IN: A=value, OUT: NZ if value is an exact multiple of 10, else Z
+	CP	10
+	JR	C, TCFG_SIZE_IS_DEC0
+TCFG_SIZE_IS_DEC1:
+	SUB	10
+	JR	Z, TCFG_SIZE_IS_DEC2
+	JR	NC, TCFG_SIZE_IS_DEC1
+TCFG_SIZE_IS_DEC0:
+	XOR	A
+	RET
+TCFG_SIZE_IS_DEC2:
+	LD	A, 1
+	OR	A			; clear Z: LD does not affect flags (old bug:
+	RET				; decade case fell through with Z still set)
+
+TCFG_DRAW_SCALES:
+	PUSH	AF
+	PUSH	BC
+	PUSH	DE
+	PUSH	HL
+
+	; top ruler labels (1, then decades)
+	LD	B, TCFG_ORG_ROW - 1
+	LD	C, 1
+	CALL	TCFG_ANSI_AT
+	CALL	TCFG_EL2
+
+	LD	B, TCFG_ORG_ROW - 1
+	LD	C, TCFG_ORG_COL
+	CALL	TCFG_ANSI_AT
+	LD	A, '1'
+	CALL	PRTCHR
+
+	LD	D, 10
+TCFG_DRAW_SCALES_TOP:
+	LD	A, (CFG_COLS)
+	CP	D
+	JR	C, TCFG_DRAW_SCALES_LEFT
+	LD	B, TCFG_ORG_ROW - 1
+	LD	A, D
+	ADD	A, TCFG_ORG_COL - 1
+	LD	C, A
+	CALL	TCFG_ANSI_AT
+	LD	A, D
+	PUSH	DE
+	CALL	PRTDECB
+	POP	DE
+	LD	A, D
+	ADD	A, 10
+	LD	D, A
+	JR	TCFG_DRAW_SCALES_TOP
+
+	; left ruler labels (decades only)
+TCFG_DRAW_SCALES_LEFT:
+	LD	D, 10
+TCFG_DRAW_SCALES_LEFT0:
+	LD	A, D
+	CP	CFG_MAX_ROWS + 1
+	JR	NC, TCFG_DRAW_SCALES_DONE
+
+	LD	A, D
+	ADD	A, TCFG_ORG_ROW - 1
+	LD	B, A
+	LD	C, 1
+	CALL	TCFG_ANSI_AT
+	LD	A, ' '
+	CALL	PRTCHR
+	CALL	PRTCHR
+	CALL	PRTCHR
+
+	LD	A, (CFG_ROWS)
+	CP	D
+	JR	C, TCFG_DRAW_SCALES_LEFT1
+	LD	A, D
+	ADD	A, TCFG_ORG_ROW - 1
+	LD	B, A
+	LD	C, 1
+	CALL	TCFG_ANSI_AT
+	LD	A, D
+	CALL	PRTDECB
+
+TCFG_DRAW_SCALES_LEFT1:
+	LD	A, D
+	ADD	A, 10
+	LD	D, A
+	JR	TCFG_DRAW_SCALES_LEFT0
+
+TCFG_DRAW_SCALES_DONE:
+	POP	HL
+	POP	DE
+	POP	BC
+	POP	AF
+	RET
+
+TCFG_CLEAR_SCALE:
+	PUSH	AF
+	PUSH	BC
+	PUSH	DE
+	PUSH	HL
+
+	; clear top ruler line so removed column decades disappear
+	LD	B, TCFG_ORG_ROW - 1
+	LD	C, 1
+	CALL	TCFG_ANSI_AT
+	CALL	TCFG_EL2
+
+	; clear left ruler gutter on full tuning height
+	LD	D, TCFG_ORG_ROW
+TCFG_CLEAR_SCALE0:
+	LD	A, D
+	CP	TCFG_ORG_ROW + CFG_MAX_ROWS
+	JR	NC, TCFG_CLEAR_SCALE1
+	LD	B, A
+	LD	C, 1
+	CALL	TCFG_ANSI_AT
+	LD	A, ' '
+	CALL	PRTCHR
+	CALL	PRTCHR
+	CALL	PRTCHR
+	CALL	PRTCHR
+	INC	D
+	JR	TCFG_CLEAR_SCALE0
+TCFG_CLEAR_SCALE1:
+	POP	HL
+	POP	DE
+	POP	BC
+	POP	AF
+	RET
+
+TCFG_DRAW_GRID:
+	PUSH	AF
+	PUSH	BC
+	PUSH	DE
+	PUSH	HL
+	CALL	TCFG_CLEAR_SCALE
+
+	LD	B, TCFG_ORG_ROW
+	LD	C, TCFG_ORG_COL
+	CALL	TCFG_ANSI_AT
+	LD	A, '+'
+	CALL	PRTCHR
+
+	LD	D, 2
+TCFG_HLINE_LOOP:
+	LD	A, (CFG_COLS)
+	CP	D
+	JR	C, TCFG_HLINE_DONE
+	LD	B, TCFG_ORG_ROW
+	LD	A, D
+	ADD	A, TCFG_ORG_COL - 1
+	LD	C, A
+	CALL	TCFG_ANSI_AT
+	LD	A, '-'
+	CALL	PRTCHR
+	INC	D
+	JR	TCFG_HLINE_LOOP
+TCFG_HLINE_DONE:
+
+	LD	D, 2
+TCFG_VLINE_LOOP:
+	LD	A, (CFG_ROWS)
+	CP	D
+	JR	C, TCFG_VLINE_DONE
+	LD	A, D
+	ADD	A, TCFG_ORG_ROW - 1
+	LD	B, A
+	LD	C, TCFG_ORG_COL
+	CALL	TCFG_ANSI_AT
+	LD	A, '|'
+	CALL	PRTCHR
+	INC	D
+	JR	TCFG_VLINE_LOOP
+TCFG_VLINE_DONE:
+
+	LD	B, TCFG_ORG_ROW - 1
+	LD	C, TCFG_ORG_COL
+	CALL	TCFG_ANSI_AT
+	LD	A, '1'
+	CALL	PRTCHR
+
+	LD	B, TCFG_ORG_ROW
+	LD	C, TCFG_ORG_COL - 1
+	CALL	TCFG_ANSI_AT
+	LD	A, '1'
+	CALL	PRTCHR
+
+	LD	D, 10
+TCFG_TOP_SCALE_LOOP:
+	LD	A, (CFG_COLS)
+	CP	D
+	JR	C, TCFG_TOP_SCALE_DONE
+	LD	B, TCFG_ORG_ROW - 1
+	LD	A, D
+	ADD	A, TCFG_ORG_COL - 1
+	LD	C, A
+	CALL	TCFG_ANSI_AT
+	LD	A, D
+	PUSH	DE
+	CALL	PRTDECB
+	POP	DE
+	LD	A, D
+	ADD	A, 10
+	JR	C, TCFG_TOP_SCALE_DONE
+	LD	D, A
+	JR	TCFG_TOP_SCALE_LOOP
+TCFG_TOP_SCALE_DONE:
+
+	LD	D, 10
+TCFG_LEFT_SCALE_LOOP:
+	LD	A, (CFG_ROWS)
+	CP	D
+	JR	C, TCFG_LEFT_SCALE_DONE
+	LD	A, D
+	ADD	A, TCFG_ORG_ROW - 1
+	LD	B, A
+	LD	C, 1
+	CALL	TCFG_ANSI_AT
+	LD	A, D
+	PUSH	DE
+	CALL	PRTDECB
+	POP	DE
+	LD	A, D
+	ADD	A, 10
+	JR	C, TCFG_LEFT_SCALE_DONE
+	LD	D, A
+	JR	TCFG_LEFT_SCALE_LOOP
+TCFG_LEFT_SCALE_DONE:
+
+	LD	B, TCFG_ORG_ROW
+	LD	A, (CFG_COLS)
+	ADD	A, TCFG_ORG_COL - 1
+	LD	C, A
+	CALL	TCFG_ANSI_AT
+	LD	A, 'C'
+	CALL	PRTCHR
+
+	LD	A, (CFG_ROWS)
+	ADD	A, TCFG_ORG_ROW - 1
+	LD	B, A
+	LD	C, TCFG_ORG_COL
+	CALL	TCFG_ANSI_AT
+	LD	A, 'R'
+	CALL	PRTCHR
+
+	LD	A, (CFG_ROWS)
+	ADD	A, TCFG_ORG_ROW - 1
+	LD	B, A
+	LD	A, (CFG_COLS)
+	ADD	A, TCFG_ORG_COL - 1
+	LD	C, A
+	CALL	TCFG_ANSI_AT
+	LD	A, 'X'
+	CALL	PRTCHR
+
+	POP	HL
+	POP	DE
+	POP	BC
+	POP	AF
+	RET
+
+TCFG_ANSI_AT:
+	PUSH	AF
+	PUSH	BC
+	PUSH	DE
+	PUSH	HL
+	LD	A, 27
+	CALL	PRTCHR
+	LD	A, '['
+	CALL	PRTCHR
+	PUSH	BC
+	LD	A, B
+	CALL	PRTDECB
+	LD	A, $3B
+	CALL	PRTCHR
+	POP	BC
+	LD	A, C
+	CALL	PRTDECB
+	LD	A, 'H'
+	CALL	PRTCHR
+	POP	HL
+	POP	DE
+	POP	BC
+	POP	AF
+	RET
+
+TCFG_GETCH:
+	CALL	GETKEY
+	OR	A
+	JR	Z, TCFG_GETCH
+	RET
+
+TCFG_CLRHOME:
+	PUSH	AF
+	LD	A, (CFG_TERM)
+	OR	A
+	JR	NZ, TCFG_CLRHOME1
+	LD	A, (CFG_FLAGS)
+	AND	CFGF_ANSI
+	JR	Z, TCFG_CLRHOME0
+TCFG_CLRHOME1:
+	LD	DE, TCFG_SEQ_CLR
+	CALL	PRTSTR
+TCFG_CLRHOME0:
+	POP	AF
+	RET
+
+TCFG_EL2:
+	PUSH	AF
+	LD	A, (CFG_TERM)
+	OR	A
+	JR	NZ, TCFG_EL21
+	LD	A, (CFG_FLAGS)
+	AND	CFGF_ANSI
+	JR	Z, TCFG_EL20
+TCFG_EL21:
+	LD	DE, TCFG_SEQ_EL2
+	CALL	PRTSTR
+TCFG_EL20:
+	POP	AF
+	RET
+
+TCFG_COL_HDR:
+	LD	DE, TCFG_SEQ_CYAN
+	JP	TCFG_EMIT
+
+TCFG_COL_PRM:
+	LD	DE, TCFG_SEQ_YEL
+	JP	TCFG_EMIT
+
+TCFG_COL_OK:
+	LD	DE, TCFG_SEQ_GRN
+	JP	TCFG_EMIT
+
+TCFG_COL_RST:
+	LD	DE, TCFG_SEQ_RST
+	JP	TCFG_EMIT
+
+TCFG_EMIT:
+	PUSH	AF
+	LD	A, (CFG_FLAGS)
+	AND	CFGF_ANSI
+	JR	Z, TCFG_EMIT0
+	CALL	PRTSTR
+TCFG_EMIT0:
+	POP	AF
+	RET
+
+;===============================================================================
+; Command tail parsing
+;===============================================================================
+
+; Parse one token from command tail.
+; Supported values (case-insensitive):
+;   PLAIN/0, VT100/1, ANSI/2 -> ERR_OK, ARG_TERM set
+;   SHOW                     -> ERR_SHOW
+;   VERIFY                   -> ERR_VERIFY
+;   (no token)               -> ERR_NO_ARG (interactive mode)
 PARSE_MODE_ARG:
 	LD	HL, $0080
 	LD	B, (HL)
@@ -297,7 +1342,7 @@ PARSE_MAP:
 	LD	DE, TOK_SHOW
 	CALL	MATCH_TOKEN
 	OR	A
-	JP	Z, PARSE_NO_ARG
+	JP	Z, PARSE_SHOW
 	LD	DE, TOK_VERIFY
 	CALL	MATCH_TOKEN
 	OR	A
@@ -315,11 +1360,11 @@ PARSE_MAP:
 	LD	DE, TOK_VT100
 	CALL	MATCH_TOKEN
 	OR	A
-	JP	Z, PARSE_SET_VT100
+	JP	Z, PARSE_SET_VT
 	LD	DE, TOK_ONE
 	CALL	MATCH_TOKEN
 	OR	A
-	JP	Z, PARSE_SET_VT100
+	JP	Z, PARSE_SET_VT
 
 	LD	DE, TOK_ANSI
 	CALL	MATCH_TOKEN
@@ -338,21 +1383,25 @@ PARSE_NO_ARG:
 	LD	A, ERR_NO_ARG
 	RET
 
+PARSE_SHOW:
+	LD	A, ERR_SHOW
+	RET
+
 PARSE_SET_PLAIN:
 	XOR	A
-	LD	(CFG_MODE), A
+	LD	(ARG_TERM), A
 	XOR	A
 	RET
 
-PARSE_SET_VT100:
-	LD	A, MODE_VT100
-	LD	(CFG_MODE), A
+PARSE_SET_VT:
+	LD	A, TERM_VT
+	LD	(ARG_TERM), A
 	XOR	A
 	RET
 
 PARSE_SET_ANSI:
-	LD	A, MODE_ANSI
-	LD	(CFG_MODE), A
+	LD	A, TERM_ANSI
+	LD	(ARG_TERM), A
 	XOR	A
 	RET
 
@@ -400,40 +1449,74 @@ TO_UPPER:
 	SUB	32
 	RET
 
-; Build FCB for VTUNE.CFG in CFG_FCB.
-BUILD_CFG_FCB:
-	LD	HL, CFG_FCB
-	LD	B, 36
-CFG_FCB_CLEAR:
-	XOR	A
-	LD	(HL), A
-	INC	HL
-	DJNZ	CFG_FCB_CLEAR
+;===============================================================================
+; Console I/O helpers
+;===============================================================================
 
-	LD	HL, CFG_FCB+1
-	LD	DE, CFG_NAME
-	LD	B, 11
-CFG_FCB_NAME:
-	LD	A, (DE)
-	LD	(HL), A
-	INC	HL
-	INC	DE
-	DJNZ	CFG_FCB_NAME
+; Get a keystroke from CP/M: A=char (NZ) or A=0 (Z) if none pending.
+GETKEY:
+	LD	C, 6		; BDOS direct console I/O
+	LD	E, $FF	; get character if available
+	CALL	BDOS
+	OR	A
 	RET
 
-PRINT_MODE_NAME:
-	CP	MODE_VT100
-	JR	Z, PRINT_MODE_VT100
-	CP	MODE_ANSI
-	JR	Z, PRINT_MODE_ANSI
-	LD	DE, TOK_PLAIN
-	JP	PRTSTR
-PRINT_MODE_VT100:
-	LD	DE, TOK_VT100
-	JP	PRTSTR
-PRINT_MODE_ANSI:
-	LD	DE, TOK_ANSI
-	JP	PRTSTR
+FLUSHKEYS:
+	PUSH	AF
+	PUSH	BC
+	PUSH	DE
+	PUSH	HL
+FLUSHKEYS1:
+	CALL	GETKEY
+	JR	Z, FLUSHKEYS2
+	JR	FLUSHKEYS1
+FLUSHKEYS2:
+	POP	HL
+	POP	DE
+	POP	BC
+	POP	AF
+	RET
+
+; Print the byte in A (0-255) as decimal, suppressing leading zeros.
+PRTDECB:
+	PUSH	BC
+	PUSH	DE
+	LD	B, 0		; leading-zero suppression flag
+	LD	C, 100
+	CALL	PRTDECB_DIG
+	LD	C, 10
+	CALL	PRTDECB_DIG
+	ADD	A, '0'
+	CALL	PRTCHR
+	POP	DE
+	POP	BC
+	RET
+
+; Divide A by C; print quotient digit unless leading zero; return remainder in A.
+PRTDECB_DIG:
+	LD	D, 0
+PRTDECB_DIG0:
+	CP	C
+	JR	C, PTDECB_DIG1
+	SUB	C
+	INC	D
+	JR	PRTDECB_DIG0
+PTDECB_DIG1:
+	LD	E, A		; remainder
+	LD	A, D
+	OR	A
+	JR	NZ, PTDECB_DIG2
+	LD	A, B
+	OR	A
+	JR	Z, PTDECB_DIG3
+PTDECB_DIG2:
+	LD	B, $FF
+	LD	A, D
+	ADD	A, '0'
+	CALL	PRTCHR
+PTDECB_DIG3:
+	LD	A, E
+	RET
 
 ; Print the zero-terminated string addressed by DE.
 PRTSTR:
@@ -454,7 +1537,10 @@ CFG_PRTSTR_DONE:
 	RET
 
 ; Print the character in A via CP/M BDOS function 2.
+; Preserves AF: CP/M Plus / ZPM3 BDOS fn 2 returns A=0, which broke
+; back-to-back PRTCHR calls (e.g. 3-space ruler erase emitted space+NUL+NUL).
 PRTCHR:
+	PUSH	AF
 	PUSH	BC
 	PUSH	DE
 	PUSH	HL
@@ -464,8 +1550,11 @@ PRTCHR:
 	POP	HL
 	POP	DE
 	POP	BC
+	POP	AF
 	RET
 
+CRLF2:
+	CALL	CRLF
 CRLF:
 	PUSH	AF
 	LD	A, 13
@@ -475,26 +1564,84 @@ CRLF:
 	POP	AF
 	RET
 
+;===============================================================================
+; Messages and data
+;===============================================================================
+
 MSG_BANNER:
 	.DB	"VibeTune Config Utility v", VT_VERSION, ", ", VT_BUILD_DATE, 0
 MSG_USAGE:
-	.DB	"Usage: VTUNECFG [plain|vt100|ansi|show|verify]", 0
+	.DB	"Usage: VTUNECFG [plain|vt100|ansi|show|verify]  (no arg = interactive setup)", 0
 MSG_ERR_BAD_ARG:
 	.DB	"Error: mode must be plain, vt100, ansi, show, or verify.", 0
 MSG_ERR_WRITE:
 	.DB	"Error: unable to write VTUNE.CFG.", 0
 MSG_OK_PREFIX:
 	.DB	"Wrote VTUNE.CFG mode: ", 0
-MSG_SHOW_PREFIX:
-	.DB	"Current VTUNE.CFG mode: ", 0
 MSG_SHOW_MISSING:
-	.DB	"VTUNE.CFG not found; using default mode.", 0
+	.DB	"VTUNE.CFG not found; using default settings.", 0
 MSG_SHOW_INVALID:
-	.DB	"VTUNE.CFG invalid; using default mode.", 0
+	.DB	"VTUNE.CFG invalid; using default settings.", 0
 MSG_VERIFY_OK:
 	.DB	"VTUNE.CFG verify: PASS", 0
 MSG_VERIFY_FAIL:
 	.DB	"VTUNE.CFG verify: FAIL", 0
+
+MSG_CFGMODE:
+	.DB	"Configuration mode", 0
+MSG_CFGFOUND:
+	.DB	"Loaded existing VTUNE.CFG:", 0
+MSG_CFGDEFAULT:
+	.DB	"No VTUNE.CFG found, using built-in defaults:", 0
+MSG_CFGINVALID:
+	.DB	"VTUNE.CFG invalid, using built-in defaults:", 0
+MSG_CFGSAVED:
+	.DB	"Saved VTUNE.CFG", 0
+MSG_CFGTERM:
+	.DB	"  Term type: ", 0
+MSG_CFGANSI:
+	.DB	"  ANSI colour: ", 0
+MSG_CFGSIZE:
+	.DB	"  Size: ", 0
+MSG_TERMMENU:
+	.DB	"Term type? P=plain, V=VTxxx, A=ANSI", 0
+MSG_TERMPROMPT:
+	.DB	"Choice [Enter keeps ", 0
+MSG_ANSIPROMPT:
+	.DB	"ANSI colour? Y/N [Enter keeps ", 0
+MSG_PROMPTEND:
+	.DB	"]: ", 0
+MSG_TERM_PLAIN:
+	.DB	"plain", 0
+MSG_TERM_VT:
+	.DB	"VTxxx", 0
+MSG_TERM_ANSI:
+	.DB	"ANSI", 0
+MSG_YES:
+	.DB	"yes", 0
+MSG_NO:
+	.DB	"no", 0
+MSG_TUNETITLE:
+	.DB	"Adjust visible limits until C, R, and X are just visible.", 0
+MSG_TUNEKEYS:
+	.DB	"Adjustment Keys: a/d for columns and w/s for rows, or arrow keys, Esc save+quit", 0
+MSG_TUNECURR:
+	.DB	"Current size: ", 0
+MSG_TUNEMAX:
+	.DB	" (max: 150 x 50)   ", 0
+
+TCFG_SEQ_CLR:
+	.DB	27, '[', '2', 'J', 27, '[', 'H', 0
+TCFG_SEQ_EL2:
+	.DB	27, '[', '2', 'K', 0
+TCFG_SEQ_CYAN:
+	.DB	27, '[', '3', '6', 'm', 0
+TCFG_SEQ_YEL:
+	.DB	27, '[', '3', '3', 'm', 0
+TCFG_SEQ_GRN:
+	.DB	27, '[', '3', '2', 'm', 0
+TCFG_SEQ_RST:
+	.DB	27, '[', '0', 'm', 0
 
 TOK_PLAIN:
 	.DB	"PLAIN", 0
@@ -516,10 +1663,25 @@ TOK_VERIFY:
 CFG_NAME:
 	.DB	"VTUNE   CFG"
 
-CFG_MODE:
-	.DB	MODE_PLAIN
-BEFORE_MODE:
-	.DB	MODE_PLAIN
+; Config record (kept contiguous, term/flags/rows/cols, for verify compare)
+CFG_TERM:
+	.DB	TERM_PLAIN
+CFG_FLAGS:
+	.DB	0
+CFG_ROWS:
+	.DB	CFG_DFL_ROWS
+CFG_COLS:
+	.DB	CFG_DFL_COLS
+BEFORE_TERM:
+	.DB	0, 0, 0, 0
+ARG_TERM:
+	.DB	TERM_PLAIN
+CFG_LOAD_STAT:
+	.DB	0
+TCFG_PREV_COLS:
+	.DB	0
+TCFG_PREV_ROWS:
+	.DB	0
 ARG_BUFFER:
 	.DS	16
 CFG_FCB:
