@@ -1,4 +1,7 @@
 ; Bulba PT2/PT3 player extracted from tune.asm (RomWBW Tune v3.16)
+; Original: Universal PT2 and PT3 player Release 1
+; (c) 2004-2007 S.V.Bulba <vorobey@mail.khstu.ru>
+; http://bulba.untergrund.net (http://bulba.at.kz)
 ; See pt3bulba_shim.inc for PORTS/Z180/SLOWIO and VARS equates.
 
 TonA	.EQU 0

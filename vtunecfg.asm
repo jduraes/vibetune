@@ -1,6 +1,10 @@
 ;===============================================================================
 ; VTUNECFG - display configuration utility for VibeTune
 ;
+; Copyright (C) 2026, Joao Miguel Duraes (fackie), GNU GPL v3 (or later).
+; Derived from the terminal-configuration mode of RomWBW's tune.asm by
+; Wayne Warthen (GNU GPL v3).
+;
 ; Writes VTUNE.CFG (128-byte record, first 5 bytes used):
 ;   byte 0: magic = $A5
 ;   byte 1: term type (0=plain, 1=VTxxx, 2=ANSI)  -- vtune.com DISP_MODE

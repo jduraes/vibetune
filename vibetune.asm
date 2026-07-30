@@ -1,9 +1,19 @@
 ;===============================================================================
-; VIBETUNE - clean-room bootstrap implementation
+; VIBETUNE - PT2/PT3/MYM music player for RomWBW CP/M (vtune.com)
 ;===============================================================================
 ;
-; This first slice proves the independent workspace can build with RomWBW tools,
-; use relative include references, and emit the required banner format.
+; Copyright (C) 2026, Joao Miguel Duraes (fackie), GNU GPL v3 (or later).
+; Derived from RomWBW's tune.asm by Wayne Warthen (GNU GPL v3).
+;
+; Incorporates third-party player engines:
+;   - Universal PT2/PT3 player (PTxPlayer) (c) 2004-2007 S.V.Bulba
+;     <vorobey@mail.khstu.ru>  http://bulba.untergrund.net (pt3bulba*.inc)
+;   - MYMPlay 0.4 by Marq/Lieves!Tuore & Fit (MYM depack/play engine)
+;
+; This program is free software: you can redistribute it and/or modify it
+; under the terms of the GNU General Public License as published by the
+; Free Software Foundation, either version 3 of the License, or (at your
+; option) any later version. See the LICENSE file for the full text.
 ;
 #include "../RomWBW/Source/ver.inc"
 #include "../RomWBW/Source/Apps/Tune/cpm.inc"
@@ -119,6 +129,7 @@
 #DEFINE RUNMODE_PLAY 0
 #DEFINE RUNMODE_LIST 1
 #DEFINE RUNMODE_HELP 2
+#DEFINE RUNMODE_CREDITS 3
 
 	.ORG	$0100
 
@@ -156,10 +167,12 @@ START:
 	JP	START_EXIT
 
 START_AFTER_PARSE_OK:
-	; Help is usage-only: print and exit without probing hardware (avoids pops).
+	; Help/credits are usage-only: print and exit without probing hardware (avoids pops).
 	LD	A, (RUN_MODE)
 	CP	RUNMODE_HELP
 	JP	Z, START_HELP
+	CP	RUNMODE_CREDITS
+	JP	Z, START_CREDITS
 	CALL	APPLY_LOOP_REQ		; -loop: resolve now that run mode is known
 	; Do not probe/query the AY for usage-only or parse errors (avoids pops).
 	CALL	DETECT_DISPLAY_MODE
@@ -201,6 +214,14 @@ START_VALIDATE_FILE_ERR:
 START_HELP:
 	CALL	PRINT_USAGE
 	LD	DE, MSG_HELP_TEXT
+	CALL	PRTSTR
+	CALL	CRLF
+	JP	START_EXIT
+
+; Attribution lives here only (not on the plain usage screen).
+; The banner with version/date has already been printed at startup.
+START_CREDITS:
+	LD	DE, MSG_CREDITS
 	CALL	PRTSTR
 	CALL	CRLF
 	JP	START_EXIT
@@ -588,6 +609,12 @@ SCAN_SW_NO_LIST:
 	LD	A, RUNMODE_HELP
 	LD	(RUN_MODE), A
 SCAN_SW_NO_HELP:
+	LD	DE, MSG_SWITCH_CREDITS
+	CALL	SCAN_SWITCH_IN_CMD
+	JR	NZ, SCAN_SW_NO_CREDITS
+	LD	A, RUNMODE_CREDITS
+	LD	(RUN_MODE), A
+SCAN_SW_NO_CREDITS:
 	LD	DE, MSG_SWITCH_LOOP
 	CALL	SCAN_SWITCH_IN_CMD
 	JR	NZ, SCAN_SW_NO_LOOP
@@ -686,6 +713,8 @@ PARSE_CLR_ARG_BUF:
 	JR	Z, PARSE_CL_DONE
 	CP	RUNMODE_HELP
 	JR	Z, PARSE_CL_DONE
+	CP	RUNMODE_CREDITS
+	JR	Z, PARSE_CL_DONE
 	CALL	COPY_FCB_TO_ARG
 	LD	A, (ARG_HAVE)
 	LD	(PARSE_SWITCH_ONLY), A
@@ -696,6 +725,8 @@ PARSE_CLR_ARG_BUF:
 	CP	RUNMODE_LIST
 	JR	Z, PARSE_CL_DONE
 	CP	RUNMODE_HELP
+	JR	Z, PARSE_CL_DONE
+	CP	RUNMODE_CREDITS
 	JR	Z, PARSE_CL_DONE
 	LD	A, (ARG_HAVE)
 	OR	A
@@ -2416,7 +2447,7 @@ CTX_LHAVE:
 	JR	CTX_LLP
 
 ;-------------------------------------------------------------------------------
-; MYM depacker (MYMPlay 0.4 core, ported from VibeTune-old).
+; MYM depacker (MYMPlay 0.4 core by Marq/Lieves!Tuore & Fit, ported from VibeTune-old).
 ; Unpacks one 128-frame fragment per MYM_EXTRACT call into a rotating pair of
 ; register windows overlaid at MUSIC_BUF; the packed file image sits at
 ; MYM_ROWS (2-byte row count, then packed data at MYM_DATA).
@@ -4218,10 +4249,17 @@ MSG_TRACKS_FOUND:
 MSG_USAGE:
 	.DB	"Usage: VTUNE [switches] file[.pt3|.pt2|.mym]", 0
 MSG_USAGE_SWITCHES:
-	.DB	"Valid switches: -help -list -loop -delay -msx -rc -coleco -eb", 0
+	.DB	"Valid switches: -help -credits -list -loop -delay -msx -rc -coleco -eb", 0
+MSG_CREDITS:
+	.DB	"Copyright (C) 2026, Joao Miguel Duraes (fackie)", 13, 10, 13, 10
+	.DB	"Derivative work from/by:", 13, 10
+	.DB	"RomWBW tune.com Copyright (C) 2026, Wayne Warthen, GNU GPL v3", 13, 10
+	.DB	"PTxPlayer Copyright (C) 2004-2007, S.V.Bulba", 13, 10
+	.DB	"MYMPlay by Marq/Lieves!Tuore", 0
 MSG_HELP_TEXT:
 	.DB	13, 10
 	.DB	"  -help     Show this help", 13, 10
+	.DB	"  -credits  Show copyright and attribution", 13, 10
 	.DB	"  -list     Playlist mode: play all PT2/PT3/MYM on the current drive", 13, 10
 	.DB	"  -loop     Loop playback: playlist in -list mode, single track otherwise", 13, 10
 	.DB	"  -delay    Force delay-loop timing instead of the HBIOS hardware timer", 13, 10
@@ -4245,6 +4283,8 @@ MSG_SWITCH_DELAY:
 	.DB	"-delay", 0
 MSG_SWITCH_HELP:
 	.DB	"-help", 0
+MSG_SWITCH_CREDITS:
+	.DB	"-credits", 0
 MSG_SWITCH_LOOP:
 	.DB	"-loop", 0
 MSG_ERR_TOO_MANY:
