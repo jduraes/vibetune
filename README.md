@@ -1,5 +1,7 @@
 # VibeTune
 
+[2026-07-30]
+
 A music player for RomWBW CP/M on real Z80-family hardware. `vtune.com` plays
 PT2, PT3 and MYM sound files on AY-3-8910 / YM2149-class sound chips, with a
 terminal-aware playlist UI and dual-chip TurboSound support.
@@ -35,16 +37,16 @@ override it:
 | `-coleco` | Coleco                                       | `$50 / $51`      |
 | `-eb`     | Ed Brindley (EB) sound module                | platform variant |
 
-The EB (Ed Brindley) module is addressed `$D8/$D0` on Z80 platforms (RC2014 /
-RCZ80) and `$68/$60` on Z180 platforms (SC126 / RCZ180). Tested on SC126 and
-RC2014; MSX and Coleco mappings are supported via the switches above.
+The EB (Ed Brindley) module (Rev 5) is addressed `$D8/$D0` on Z80 platforms (RC2014 /
+RCZ80) and `$68/$60` on Z180 platforms (SC126 / RCZ180). Tested on SC126 and RC2014. 
+MSX and Coleco mappings are supported via the switches above and/or auto-detection.
 
 ## TurboSound
 
-Packed dual-module PT3 TurboSound files are detected and played through two
-AY port sets (chip 1 + chip 2), with per-chip playback contexts and a
-dual-chip mute on exit. Single-chip files play unchanged on either
-configuration.
+Packed dual-module PT3 TurboSound files are detected and played through two AY port 
+sets (chip 1 + chip 2), with per-chip playback contexts. Single-chip files play 
+unchanged on either configuration. 
+It favours MSX+Coleco addressing but that can be changed in source.
 
 ## Usage
 
