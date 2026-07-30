@@ -72,13 +72,13 @@ CurPos	.DB 0 ;for visualization only (i.e. no need for playing)
 #ENDIF
 
 ;Identifier
-	.IF Id
+#IF Id
 	.DB "=Uni PT2 and PT3 Player r."
 	.DB Release
 	.DB "="
-	.ENDIF
+#ENDIF
 
-	.IF LoopChecker
+#IF LoopChecker
 CHECKLP	LD HL,SETUP
 	SET 7,(HL)
 	LD A,1
@@ -90,7 +90,7 @@ CHECKLP	LD HL,SETUP
 	INC (HL)
 	LD HL,ChanA+NtSkCn
 	INC (HL)
-	.ENDIF
+#ENDIF
 
 MUTE	CALL	ISHBIOS
 	JR	NZ,MUTEVIAHBIOS
@@ -352,7 +352,7 @@ L1	PUSH BC
 	EX DE,HL
 	LD DE,23
 	;LD IXH,8		; -WW
-	LD (IX),8		; +WW
+	LD (IX+0),8		; +WW
 
 L2	SRL B
 	RR C
@@ -366,7 +366,7 @@ L3	.DB $19	;AND A or NOP
 	LD (HL),A
 	ADD HL,DE
 	;DEC IXH		; -WW
-	DEC (IX)		; +WW
+	DEC (IX+0)		; +WW
 	JR NZ,L2
 
 	POP DE
@@ -437,7 +437,7 @@ INITV1  LD A,L
 M2      .DB $7D
 	LD A,H
 	ADC A,0
-	LD (IX),A
+	LD (IX+0),A
 	INC IX
 	ADD HL,DE
 	DJNZ INITV1
