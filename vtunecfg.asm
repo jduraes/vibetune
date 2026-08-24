@@ -5,12 +5,13 @@
 ; Derived from the terminal-configuration mode of RomWBW's tune.asm by
 ; Wayne Warthen (GNU GPL v3).
 ;
-; Writes VTUNE.CFG (128-byte record, first 5 bytes used):
+; Writes VTUNE.CFG (128-byte record, first 6 bytes used):
 ;   byte 0: magic = $A5
 ;   byte 1: term type (0=plain, 1=VTxxx, 2=ANSI)  -- vtune.com DISP_MODE
 ;   byte 2: flags (bit 0 = ANSI colour)
 ;   byte 3: rows (0 -> default 24)
 ;   byte 4: cols (0 -> default 80)
+;   byte 5: TS topology (0=auto, 1=dual-card, 2=single-card dual-AVR module)
 ;
 ; vtune.com reads only bytes 0-1; bytes 2-4 are forward-compatible extensions
 ; (same semantics as the old TERM.CFG layout used by the -config mode).
@@ -39,6 +40,10 @@
 #DEFINE CFG_MAX_COLS 150
 #DEFINE CFG_DFL_ROWS 24
 #DEFINE CFG_DFL_COLS 80
+
+#DEFINE TS_TOPO_AUTO     0
+#DEFINE TS_TOPO_DUALCARD 1
+#DEFINE TS_TOPO_MODULE   2
 
 #DEFINE TCFG_ORG_ROW 5
 #DEFINE TCFG_ORG_COL 5
@@ -128,7 +133,7 @@ START_VERIFY:
 
 	LD	HL, CFG_TERM
 	LD	DE, BEFORE_TERM
-	LD	BC, 4
+	LD	BC, 5
 	LDIR
 
 	CALL	CFG_SAVE
@@ -141,7 +146,7 @@ START_VERIFY:
 
 	LD	HL, CFG_TERM
 	LD	DE, BEFORE_TERM
-	LD	B, 4
+	LD	B, 5
 START_VERIFY_CMP:
 	LD	A, (DE)
 	CP	(HL)
@@ -196,6 +201,7 @@ START_INT_STATUS:
 
 	CALL	TCFG_ASK_TERM
 	CALL	TCFG_ASK_ANSI
+	CALL	TCFG_ASK_TS
 
 	LD	A, (CFG_TERM)
 	OR	A
@@ -241,6 +247,7 @@ CFG_DEFAULTS:
 	XOR	A
 	LD	(CFG_TERM), A
 	LD	(CFG_FLAGS), A
+	LD	(CFG_TSTOPO), A
 	LD	A, CFG_DFL_ROWS
 	LD	(CFG_ROWS), A
 	LD	A, CFG_DFL_COLS
@@ -260,6 +267,8 @@ CFG_LOAD:
 	CALL	BDOS
 	CP	$FF
 	JR	Z, CFG_LOAD_MISSING
+	XOR	A
+	LD	(DMA_BUFFER+5), A	; short/old file -> byte 5 = 0 (TS auto)
 	LD	DE, CFG_FCB
 	LD	C, $14
 	CALL	BDOS
@@ -290,6 +299,12 @@ CFG_LOAD_ROWS_OK:
 	LD	A, CFG_DFL_COLS
 CFG_LOAD_COLS_OK:
 	LD	(CFG_COLS), A
+	LD	A, (DMA_BUFFER+5)	; old files: record was zero-filled -> 0 (auto)
+	CP	3
+	JR	C, CFG_LOAD_TS_OK
+	XOR	A
+CFG_LOAD_TS_OK:
+	LD	(CFG_TSTOPO), A
 
 	LD	DE, CFG_FCB
 	LD	C, $10
@@ -331,6 +346,8 @@ CFG_SAVE_CLR:
 	LD	(DMA_BUFFER+3), A
 	LD	A, (CFG_COLS)
 	LD	(DMA_BUFFER+4), A
+	LD	A, (CFG_TSTOPO)
+	LD	(DMA_BUFFER+5), A
 
 	LD	DE, DMA_BUFFER
 	LD	C, $1A
@@ -422,6 +439,11 @@ TCFG_SUMMARY0:
 	CALL	PRTCHR
 	LD	A, (CFG_ROWS)
 	CALL	PRTDECB
+	CALL	CRLF
+	LD	DE, MSG_CFGTS
+	CALL	PRTSTR
+	LD	A, (CFG_TSTOPO)
+	CALL	PRINT_TS_NAME
 	RET
 
 PRINT_TERM_NAME:
@@ -523,6 +545,68 @@ TCFG_ASK_ANSI_NO:
 	AND	$FF-CFGF_ANSI
 	LD	(CFG_FLAGS), A
 	RET
+
+;-------------------------------------------------------------------------------
+; TurboSound hardware topology: 0=auto (probe dual-card), 1=dual-card,
+; 2=single-card dual-AVR module (0xFF/0xFE chip select on one port pair)
+;-------------------------------------------------------------------------------
+TCFG_ASK_TS:
+TCFG_ASK_TS0:
+	CALL	TCFG_COL_PRM
+	LD	DE, MSG_TSMENU
+	CALL	PRTSTR
+	CALL	CRLF
+	LD	DE, MSG_TSPROMPT
+	CALL	PRTSTR
+	LD	A, (CFG_TSTOPO)
+	CALL	PRINT_TS_NAME
+	LD	DE, MSG_PROMPTEND
+	CALL	PRTSTR
+	CALL	TCFG_COL_RST
+	CALL	TCFG_GETCH
+	CP	13
+	JR	Z, TCFG_ASK_TS_KEEP
+	PUSH	AF
+	CALL	PRTCHR
+	CALL	CRLF
+	POP	AF
+	CALL	TO_UPPER
+	CP	'A'
+	JR	Z, TCFG_ASK_TS_AUTO
+	CP	'D'
+	JR	Z, TCFG_ASK_TS_DUAL
+	CP	'M'
+	JR	Z, TCFG_ASK_TS_MOD
+	JR	TCFG_ASK_TS0
+TCFG_ASK_TS_KEEP:
+	CALL	CRLF
+	RET
+TCFG_ASK_TS_AUTO:
+	XOR	A
+	LD	(CFG_TSTOPO), A
+	RET
+TCFG_ASK_TS_DUAL:
+	LD	A, TS_TOPO_DUALCARD
+	LD	(CFG_TSTOPO), A
+	RET
+TCFG_ASK_TS_MOD:
+	LD	A, TS_TOPO_MODULE
+	LD	(CFG_TSTOPO), A
+	RET
+
+PRINT_TS_NAME:
+	CP	TS_TOPO_DUALCARD
+	JR	Z, PRINT_TS_DUAL
+	CP	TS_TOPO_MODULE
+	JR	Z, PRINT_TS_MOD
+	LD	DE, MSG_TS_AUTO
+	JP	PRTSTR
+PRINT_TS_DUAL:
+	LD	DE, MSG_TS_DUAL
+	JP	PRTSTR
+PRINT_TS_MOD:
+	LD	DE, MSG_TS_MOD
+	JP	PRTSTR
 
 ;-------------------------------------------------------------------------------
 ; Interactive screen size tuning grid
@@ -1607,6 +1691,18 @@ MSG_CFGANSI:
 	.DB	"  ANSI colour: ", 0
 MSG_CFGSIZE:
 	.DB	"  Size: ", 0
+MSG_CFGTS:
+	.DB	"  TurboSound: ", 0
+MSG_TSMENU:
+	.DB	"TurboSound hardware? A=auto-detect, D=dual card, M=single-card AVR module", 0
+MSG_TSPROMPT:
+	.DB	"Choice [Enter keeps ", 0
+MSG_TS_AUTO:
+	.DB	"auto-detect", 0
+MSG_TS_DUAL:
+	.DB	"dual card", 0
+MSG_TS_MOD:
+	.DB	"AVR module", 0
 MSG_TERMMENU:
 	.DB	"Term type? P=plain, V=VTxxx, A=ANSI", 0
 MSG_TERMPROMPT:
@@ -1667,7 +1763,7 @@ TOK_VERIFY:
 CFG_NAME:
 	.DB	"VTUNE   CFG"
 
-; Config record (kept contiguous, term/flags/rows/cols, for verify compare)
+; Config record (kept contiguous, term/flags/rows/cols/tstopo, for verify compare)
 CFG_TERM:
 	.DB	TERM_PLAIN
 CFG_FLAGS:
@@ -1676,8 +1772,10 @@ CFG_ROWS:
 	.DB	CFG_DFL_ROWS
 CFG_COLS:
 	.DB	CFG_DFL_COLS
+CFG_TSTOPO:
+	.DB	TS_TOPO_AUTO
 BEFORE_TERM:
-	.DB	0, 0, 0, 0
+	.DB	0, 0, 0, 0, 0
 ARG_TERM:
 	.DB	TERM_PLAIN
 CFG_LOAD_STAT:

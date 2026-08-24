@@ -81,6 +81,10 @@
 #DEFINE AUDIO_OUT_AY 0
 #DEFINE AUDIO_OUT_TURBOSOUND 1
 #DEFINE SND_AY38910 2
+; TS topology (VTUNE.CFG byte 5 / -tsm); routines in tsmodule.inc
+#DEFINE TS_TOPO_AUTO	0
+#DEFINE TS_TOPO_DUALCARD 1
+#DEFINE TS_TOPO_MODULE	2
 
 ; Tune module load area: heap from MDLADDR up to HEAPENDB page (set at startup).
 #DEFINE HEAPEND $C000
@@ -392,6 +396,8 @@ START_EXIT_SILENCE_ONE:
 ;   byte 2: flags (bit 0 = ANSI colour)
 ;   byte 3: rows (0 -> default 24)
 ;   byte 4: cols (0 -> default 80)
+;   byte 5: TS topology (0=auto, 1=dual-card, 2=single-card module;
+;           absent in old 5-byte files -> auto)
 ; Missing file or invalid magic → DISP_MODE stays DISP_PLAIN.
 ; No VT100/ANSI probing is attempted at runtime; the config file is
 ; the sole authority on display capability.
@@ -411,6 +417,8 @@ DETECT_DISPLAY_MODE:
 	CP	$FF
 	JR	Z, DETECT_DISP_NO_CFG	; file not found — use default
 	; Read one 128-byte block (BDOS 14h)
+	XOR	A
+	LD	(DMA_BUFFER+5), A	; old 5-byte CFG files -> byte 5 reads as 0 (TS auto)
 	LD	DE, CFG_FCB
 	LD	C, $14
 	CALL	BDOS
@@ -443,6 +451,11 @@ DETECT_DISP_ROWS_OK:
 	LD	A, 80
 DETECT_DISP_COLS_OK:
 	LD	(CFG_COLS), A
+	; Byte 5: TS topology (0=auto, 1=dual-card, 2=single-card module)
+	LD	A, (DMA_BUFFER+5)
+	CP	3
+	JR	NC, DETECT_DISP_CLOSE	; out of range — keep auto
+	LD	(TS_TOPOLOGY), A
 DETECT_DISP_CLOSE:
 	; Close config file (BDOS 10h)
 	LD	DE, CFG_FCB
@@ -627,6 +640,8 @@ SCAN_SW_TABLE:
 	.DB	HW_MODE_EB
 	.DW	MSG_SWITCH_DELAY, DELAYMD
 	.DB	1
+	.DW	MSG_SWITCH_TSM, TS_TOPOLOGY
+	.DB	TS_TOPO_MODULE
 	.DW	0			; end marker
 
 ; Z = 1 if A is NUL, CR, or CP/M end-of-line (high bit set on last byte).
@@ -1903,6 +1918,8 @@ PLAYBACK_TICK_DONE:
 
 #include "uian.inc"
 
+#include "tsmodule.inc"
+
 #DEFINE PTX_HDR_OFFSET $62
 #DEFINE PT3SIG0 'P'
 #DEFINE PT3SIG1 'T'
@@ -1953,6 +1970,10 @@ TS_PORTS_SETUP:
 	CALL	TS_ASSIGN_DESC1
 	XOR	A
 	LD	(TS_DUALHW), A
+
+	LD	A, (TS_TOPOLOGY)
+	CP	TS_TOPO_MODULE
+	JR	Z, TS_PORTS_SETUP_MODULE
 
 	LD	HL, ($FFFC)
 	LD	A, 'W'
@@ -2027,6 +2048,15 @@ TS_PORTS_SETUP_DUAL_OK:
 	LD	(TS_DUALHW), A
 	RET
 
+; Single-card dual-AVR module: one port pair, both chips reached via
+; 0xFF/0xFE select latches (tsmodule.inc). No probing possible (the module
+; is Hi-Z on reads) - the user declared the topology via CFG/switch.
+TS_PORTS_SETUP_MODULE:
+	CALL	TS_ASSIGN_DESC2
+	LD	A, 1
+	LD	(TS_DUALHW), A
+	RET
+
 TS_ASSIGN_DESC1:
 	LD	A, (TS_PORT1_RSEL)
 	JP	TS_RSEL_TO_DESC1
@@ -2089,14 +2119,35 @@ TS_SETPORTS1:
 	LD	(BULBA_PORTS + 0), A
 	LD	A, (TS_PORT1_RDAT)
 	LD	(BULBA_PORTS + 1), A
-	RET
+	LD	A, (TS_TOPOLOGY)
+	CP	TS_TOPO_MODULE
+	RET	NZ
+	LD	A, (TS_PORT1_RSEL)	; module: keep PSG globals on the pair too
+	LD	(PSG_REG_PORT), A
+	LD	A, (TS_PORT1_RDAT)
+	LD	(PSG_DATA_PORT), A
+	LD	A, $FF		; module: select chip 0
+	JP	TSMOD_SELECT
 
 TS_SETPORTS2:
+	LD	A, (TS_TOPOLOGY)
+	CP	TS_TOPO_MODULE
+	JR	Z, TS_SETPORTS2_MOD
 	LD	A, (TS_PORT2_RSEL)
 	LD	(BULBA_PORTS + 0), A
 	LD	A, (TS_PORT2_RDAT)
 	LD	(BULBA_PORTS + 1), A
 	RET
+TS_SETPORTS2_MOD:
+	; module: same single port pair as chip 0, select chip 1
+	LD	A, (TS_PORT1_RSEL)
+	LD	(BULBA_PORTS + 0), A
+	LD	(PSG_REG_PORT), A
+	LD	A, (TS_PORT1_RDAT)
+	LD	(BULBA_PORTS + 1), A
+	LD	(PSG_DATA_PORT), A
+	LD	A, $FE
+	JP	TSMOD_SELECT
 
 TS_INIT:
 	LD	A, (TS_DUALHW)
@@ -2141,6 +2192,9 @@ TS_PLAYQUARK:
 
 ; Hard-mute both TurboSound chips via detected port pairs (not chip-1 globals only).
 TS_MUTE_BOTH_HARDWARE:
+	LD	A, (TS_TOPOLOGY)
+	CP	TS_TOPO_MODULE
+	JP	Z, TSMOD_MUTE
 	LD	A, (TS_PORT1_RSEL)
 	LD	(PSG_REG_PORT), A
 	LD	A, (TS_PORT1_RDAT)
@@ -4124,7 +4178,8 @@ MSG_HELP_TEXT:
 	.DB	"  -msx      Force MSX standard PSG ports ($A0/$A1)", 13, 10
 	.DB	"  -rc       Force RC2014 standard PSG ports ($D8/$D0)", 13, 10
 	.DB	"  -coleco   Force Coleco PSG ports ($50/$51)", 13, 10
-	.DB	"  -eb       Force Ed Brindley (EB) sound module ports", 13, 10, 13, 10
+	.DB	"  -eb       Force Ed Brindley (EB) sound module ports", 13, 10
+	.DB	"  -tsm      TurboSound via single-card dual-AVR module (0xFF/0xFE select)", 13, 10, 13, 10
 	.DB	"Playlist keys: Esc=quit, Space=pause, N/P=track, WASD/arrows=nav,", 13, 10
 	.DB	"  l/L=loop track/playlist, R=redraw, DEL x3=delete selected file", 0
 MSG_SWITCH_LIST:
@@ -4139,6 +4194,8 @@ MSG_SWITCH_EB:
 	.DB	"-eb", 0
 MSG_SWITCH_DELAY:
 	.DB	"-delay", 0
+MSG_SWITCH_TSM:
+	.DB	"-tsm", 0
 MSG_SWITCH_HELP:
 	.DB	"-help", 0
 MSG_SWITCH_CREDITS:
@@ -4282,6 +4339,8 @@ TSFLAG:
 	.DB	0
 TS_DUALHW:
 	.DB	0
+TS_TOPOLOGY:
+	.DB	TS_TOPO_AUTO	; VTUNE.CFG byte 5 / -tsm switch (0=auto, 1=dual-card, 2=module)
 TS_OFF2:
 	.DW	0
 TS_LEN2:

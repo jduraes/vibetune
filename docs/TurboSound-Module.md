@@ -76,10 +76,10 @@ Old 5-byte CFG files simply leave topology = auto. vtunecfg writes 6 bytes.
 
 ## Work items
 
-1. [ ] `tsmodule.inc`: `TSMOD_SELECT` + `TSMOD_SETPORTS1/2` skeleton (added in this branch, not yet wired)
-2. [ ] vibetune.asm: `TS_TOPOLOGY` var, CFG byte-5 load, branch in TS_PLAYQUARK/TS_INIT/TS_MUTE
-3. [ ] CLI switch (proposal: `-tsm` = module, overrides CFG)
-4. [ ] vtunecfg.asm: menu + byte-5 write
+1. [x] `tsmodule.inc`: `TSMOD_SELECT` / `TSMOD_MUTE` (done, v0.0.193)
+2. [x] vibetune.asm: `TS_TOPOLOGY`, CFG byte-5 load, branches in TS_SETPORTS1/2/TS_MUTE/TS_PORTS_SETUP (done, v0.0.193)
+3. [x] CLI switch `-tsm` (done, v0.0.193)
+4. [x] vtunecfg.asm: TS hardware prompt + byte-5 load/save (done, v0.0.193)
 5. [ ] Hardware test on SC126: `vtune RL2WOFTS.PT3` on the module (both AVRs),
       regression: dual-card unchanged
 6. [ ] README.md systems table update
