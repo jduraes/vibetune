@@ -1,44 +1,55 @@
 ;======================================================================
 ; tsmodule.inc — single-card dual-AVR TurboSound module support
 ;
-; (TS_TOPO_* defines live near the top of vibetune.asm - TASM #DEFINEs
-; are order-sensitive and the switch table needs them early.)
-;
-; The module (two ATmega8A emulators on one DIP-40 footprint) presents ONE
-; port pair (MSX standard $A0 RSEL / $A1 RDAT). Chips are selected by
-; latching a TurboSound code to RSEL as if it were a register number:
-;   0xFF -> chip 0 (also the default after reset)
-;   0xFE -> chip 1
-; Selection is sticky until the next select code. Register numbers are
-; 0-15 (D7=0), so normal latches never disturb the selection.
-;
-; Timing (AVR-side RCA, 2026-08-24): strobes need >= ~380ns (RomWBW
-; Z180_IOWAIT=3 covers it) and the AVR services each access in a ~1us ISR,
-; so the select OUT must go through the slow-I/O path like PSG_WRITE_REG.
+; One port pair (MSX $A0/$A1). Chips selected by latching 0xFF (chip 0) or
+; 0xFE (chip 1) to RSEL. Selection is sticky; normal regs 0-15 never clear it.
+; Select OUT shares the Bulba ROUT slow-I/O window (TSMOD_SLOWIO).
 ;======================================================================
 
 ;----------------------------------------------------------------------
-; TSMOD_SELECT — select module chip.
-; Input:  A = $FF (chip 0) or $FE (chip 1)
-; Uses PSG_REG_PORT as the RSEL port (caller sets it first).
-; Clobbers: AF; BC preserved (PSG_IO_SLOW_* preserve BC, we push it).
+; TSMOD_SLOWIO — SLOWIO hook: DCNTL slow enter, then optional module select.
+; TSMOD_CURSEL: 0 = dual-card/single; $FF/$FE = module chip for this ROUT.
+; Clobbers AF; BC preserved.
+;----------------------------------------------------------------------
+TSMOD_SLOWIO:
+	CALL	PSG_IO_SLOW_ENTER
+	LD	A, (TS_TOPOLOGY)
+	CP	TS_TOPO_MODULE
+	RET	NZ
+	LD	A, (TSMOD_CURSEL)
+	OR	A
+	RET	Z
+	PUSH	BC
+	LD	B, A			; B = select code
+	LD	A, (BULBA_PORTS)	; RSEL
+	LD	C, A
+	LD	A, B
+	LD	B, 0			; OUT (C),A uses full BC as port
+	OUT	(C), A
+	POP	BC
+	RET
+
+;----------------------------------------------------------------------
+; TSMOD_SELECT — select module chip (mute / non-ROUT paths).
+; Input: A = $FF (chip 0) or $FE (chip 1). Sets TSMOD_CURSEL.
 ;----------------------------------------------------------------------
 TSMOD_SELECT:
+	LD	(TSMOD_CURSEL), A
 	PUSH	BC
-	LD	C, A			; select code
+	LD	C, A
 	CALL	PSG_IO_SLOW_ENTER
-	LD	B, C			; code
 	LD	A, (PSG_REG_PORT)
-	LD	C, A			; RSEL port
+	LD	B, C
+	LD	C, A
 	LD	A, B
-	OUT	(C), A			; latch 0xFF/0xFE (no RDAT write follows)
+	LD	B, 0
+	OUT	(C), A
 	CALL	PSG_IO_SLOW_EXIT
 	POP	BC
 	RET
 
 ;----------------------------------------------------------------------
-; TSMOD_MUTE — mute both chips on one port pair (module-topology
-; replacement for TS_MUTE_BOTH_HARDWARE).
+; TSMOD_MUTE — mute both module chips on the single port pair.
 ;----------------------------------------------------------------------
 TSMOD_MUTE:
 	LD	A, (TS_PORT1_RSEL)
@@ -51,5 +62,5 @@ TSMOD_MUTE:
 	LD	A, $FE
 	CALL	TSMOD_SELECT
 	CALL	PSG_MUTE_ROUT
-	LD	A, $FF			; leave chip 0 selected (power-on default state)
+	LD	A, $FF			; leave chip 0 selected
 	JP	TSMOD_SELECT

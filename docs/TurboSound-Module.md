@@ -15,13 +15,21 @@ Support **two TurboSound hardware topologies**, user-selectable:
 
 ## Why a mode, not auto-detection
 
-The AVR module never drives the data bus (Hi-Z on reads by design — see the
-RCA session `2026-08-24-turbosound-avr-latency-rca`). Port readback probing
-sees a floating bus, so reliable software auto-detect of module-vs-real-chip
-is not possible. The user tells VibeTune which topology is installed:
+The AVR module never drives the data bus (Hi-Z on reads by design). Port
+readback probing cannot *positively* prove a module is present. Auto topology
+treats Hi-Z on the configured play ports as module dual (FF/FE); `-tsm` / CFG
+module still force that path. Dual real cards need explicit CFG chip2 ports
+(RomWBW does not enumerate two AYs; Z180 must not probe alien pairs).
 
-- `vtunecfg.com` menu option (persistent, VTUNE.CFG), and/or
-- a CLI switch for one-shot override.
+**Z180 port safety (v0.0.216+):** HBIOS platform id + `Z180_IO_BASE` (usually
+`$C0` on SC126/RCZ180) define an internal I/O window
+`[Z180_IO_BASE, Z180_IO_BASE+3Fh]`. AY ports in that range (notably `-rc`
+`$D0`/`$D8`) are not an external sound card. `SANITIZE_AY_PORTS` prints
+guidance (Rev5 → EB `$60`/`$68`; Rev6.1 → MSX `$A0`/`$A1` or Coleco
+`$50`/`$51`) and **aborts**. ROUT clears B before every `OUT (C),A` / `OUTI`.
+Dual-AVR module play auto-enables when play ports look Hi-Z (or via `-tsm` /
+CFG module). A TS file on a single readable AY plays chip 1 only
+(`Single-Card mode` in the UI).
 
 ## Architecture impact (small by design)
 
@@ -80,9 +88,9 @@ Old 5-byte CFG files simply leave topology = auto. vtunecfg writes 6 bytes.
 2. [x] vibetune.asm: `TS_TOPOLOGY`, CFG byte-5 load, branches in TS_SETPORTS1/2/TS_MUTE/TS_PORTS_SETUP (done, v0.0.193)
 3. [x] CLI switch `-tsm` (done, v0.0.193)
 4. [x] vtunecfg.asm: TS hardware prompt + byte-5 load/save (done, v0.0.193)
-5. [ ] Hardware test on SC126: `vtune RL2WOFTS.PT3` on the module (both AVRs),
-      regression: dual-card unchanged
+5. [x] Hardware test on SC126: module dual-AVR + VibeTune `-tsm` (2026-08-24)
 6. [ ] README.md systems table update
+7. [ ] Real dual-card AY regression (no `-tsm`) on physical chips
 
 ## Out of scope
 

@@ -22,8 +22,9 @@ ISHBIOS:
 	OR	A
 	RET
 
+; Module topology: select FF/FE inside the same slow-I/O window as ROUT.
 SLOWIO:
-	JP	PSG_IO_SLOW_ENTER
+	JP	TSMOD_SLOWIO
 
 NORMIO:
 	JP	PSG_IO_SLOW_EXIT

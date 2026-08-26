@@ -29,6 +29,7 @@
 #DEFINE ERR_FILE_READ 6
 #DEFINE ERR_INVALID_DATA 7
 #DEFINE ERR_ENGINE_INIT 8
+#DEFINE ERR_UNKNOWN_SWITCH 9
 
 #DEFINE ENGINE_NONE 0
 #DEFINE ENGINE_PTX 1
@@ -108,6 +109,8 @@
 #DEFINE KEY_QUIT_ESC $1B
 #DEFINE KEY_QUIT_CTRL_C $03
 #DEFINE KEY_PAUSE  ' '
+#DEFINE KEY_ENTER  $0D		; CR — play selected track while paused
+#DEFINE KEY_ENTER_LF $0A	; LF (some consoles)
 #DEFINE KEY_NEXT   'N'
 #DEFINE KEY_NEXT_L 'n'
 #DEFINE KEY_PREV   'P'
@@ -150,7 +153,8 @@ START:
 	LD	(STATUS_MSG_PENDING), A
 	CALL	CRLF
 	LD	DE, MSG_BANNER
-	CALL	PRTLN
+	CALL	PRTSTR
+	CALL	CRLF
 	; All switches are detected by SCAN_CMDLINE_SWITCHES (inside
 	; PARSE_AND_CLASSIFY), which reads $0081 before any BDOS file I/O.
 	CALL	PARSE_AND_CLASSIFY
@@ -164,8 +168,11 @@ START:
 	JP	Z, START_INVALID_FILENAME
 	CP	ERR_FILE_NOT_FOUND
 	JP	Z, START_FILE_NOT_FOUND
+	CP	ERR_UNKNOWN_SWITCH
+	JP	Z, START_UNKNOWN_SWITCH
 	LD	DE, MSG_ERR_UNSUPPORTED
-	CALL	PRTLN
+	CALL	PRTSTR
+	CALL	CRLF
 	JP	START_EXIT
 
 START_AFTER_PARSE_OK:
@@ -181,6 +188,9 @@ START_AFTER_PARSE_OK:
 	CALL	DETECT_HARDWARE_CONFIG
 	CALL	PSG_MUTE_DIRECT		; Belt-and-suspenders: zero all PSG regs after probe
 	CALL	BULBA_SYNC_PORTS
+	; Snapshot Bulba self-mod + zeroed VARS once, before any INIT/PLAY.
+	; TS_INIT must reload this — not a post-play CTX_SAVE (poisoned template).
+	CALL	TS_CAPTURE_PRISTINE
 	CALL	PROBETIMER
 	CALL	INIT_QDLY_BASE
 	CALL	PRINT_TIMING_MODE
@@ -209,20 +219,23 @@ START_VALIDATE_FILE_ERR:
 	CP	ERR_FILE_NOT_FOUND
 	JP	Z, START_FILE_NOT_FOUND
 	LD	DE, MSG_ERR_FILE_READ
-	CALL	PRTLN
+	CALL	PRTSTR
+	CALL	CRLF
 	JP	START_EXIT
 
 START_HELP:
 	CALL	PRINT_USAGE
 	LD	DE, MSG_HELP_TEXT
-	CALL	PRTLN
+	CALL	PRTSTR
+	CALL	CRLF
 	JP	START_EXIT
 
 ; Attribution lives here only (not on the plain usage screen).
 ; The banner with version/date has already been printed at startup.
 START_CREDITS:
 	LD	DE, MSG_CREDITS
-	CALL	PRTLN
+	CALL	PRTSTR
+	CALL	CRLF
 	JP	START_EXIT
 
 START_NO_ARG:
@@ -231,15 +244,32 @@ START_NO_ARG:
 
 START_TOO_MANY:
 	LD	DE, MSG_ERR_TOO_MANY
-	CALL	PRTLN
+	CALL	PRTSTR
+	CALL	CRLF
 	CALL	PRINT_USAGE
+	JP	START_EXIT
+
+START_UNKNOWN_SWITCH:
+	LD	DE, MSG_ERR_UNKNOWN_SWITCH_PFX
+	CALL	PRTSTR
+	LD	DE, ARG_SCRATCH		; bad token left by validator
+	CALL	PRTSTR
+	LD	DE, MSG_ERR_UNKNOWN_SWITCH_SFX
+	CALL	PRTSTR
+	CALL	CRLF
+	LD	DE, MSG_USAGE_SWITCHES
+	CALL	PRTSTR
+	CALL	CRLF
 	JP	START_EXIT
 
 PRINT_USAGE:
 	LD	DE, MSG_USAGE
-	CALL	PRTLN
+	CALL	PRTSTR
+	CALL	CRLF
 	LD	DE, MSG_USAGE_SWITCHES
-	JP	PRTLN
+	CALL	PRTSTR
+	CALL	CRLF
+	RET
 
 ; -loop was parsed before the run mode was known; resolve LOOP_MODE now.
 ; Playlist mode loops the playlist, direct-file mode loops the track.
@@ -258,27 +288,32 @@ APPLY_LOOP_REQ_SET:
 
 START_INVALID_FILENAME:
 	LD	DE, MSG_ERR_INVALID_FILENAME
-	CALL	PRTLN
+	CALL	PRTSTR
+	CALL	CRLF
 	JP	START_EXIT
 
 START_FILE_NOT_FOUND:
 	LD	DE, MSG_ERR_FILE_NOT_FOUND
-	CALL	PRTLN
+	CALL	PRTSTR
+	CALL	CRLF
 	JP	START_EXIT
 
 START_INVALID_DATA:
 	LD	DE, MSG_ERR_INVALID_DATA
-	CALL	PRTLN
+	CALL	PRTSTR
+	CALL	CRLF
 	JP	START_EXIT
 
 START_ENGINE_INIT_ERR:
 	LD	DE, MSG_ERR_ENGINE_INIT
-	CALL	PRTLN
+	CALL	PRTSTR
+	CALL	CRLF
 	JP	START_EXIT
 
 START_LOAD_FAIL:
 	LD	DE, MSG_ERR_FILE_READ
-	CALL	PRTLN
+	CALL	PRTSTR
+	CALL	CRLF
 	JP	START_EXIT
 
 START_OK:
@@ -307,6 +342,7 @@ START_LOAD_ENGINE_OK:
 	LD	A, (FILE_ENGINE)
 START_LOAD_SHOW_MODE:
 	CALL	META_SNAPSHOT
+	CALL	UPDATE_AUDIO_MODE_FROM_MUSIC
 	LD	A, (UI_ACTIVE)
 	OR	A
 	JR	Z, START_LOAD_SHOW_PLAIN
@@ -314,13 +350,20 @@ START_LOAD_SHOW_MODE:
 	JP	MAIN_LOOP
 START_LOAD_SHOW_PLAIN:
 	CALL	CRLF
-	CALL	PRINT_PLAYBACK_HW_CONFIG
-	CALL	PRINT_CURRENT_TRACK_STATUS
+	CALL	PRINT_INPUT_FILE_LINE
+	CALL	CRLF
 	CALL	PRINT_SONG_META_PLAIN
-	CALL	UPDATE_AUDIO_MODE_FROM_MUSIC
-	CALL	PRINT_AUDIO_MODE_STATUS
-	LD	DE, MSG_PLAYING
-	CALL	PRTLN
+	CALL	PRINT_PLAYBACK_HW_CONFIG
+	LD	A, (PLAY_STATE)
+	CP	PLAY_PAUSED
+	JR	Z, START_LOAD_SHOW_PAUSED
+	LD	DE, MSG_STATE_PLAYING
+	JR	START_LOAD_SHOW_STATE
+START_LOAD_SHOW_PAUSED:
+	LD	DE, MSG_STATE_PAUSED
+START_LOAD_SHOW_STATE:
+	CALL	PRTSTR
+	CALL	CRLF
 	JP	MAIN_LOOP
 
 START_SCAN:
@@ -329,7 +372,8 @@ START_SCAN:
 	OR	A
 	JR	NZ, START_SCAN_UI
 	LD	DE, MSG_SCANNING
-	CALL	PRTLN
+	CALL	PRTSTR
+	CALL	CRLF
 	CALL	SCAN_TRACKS
 	LD	DE, MSG_TRACKS_FOUND
 	CALL	PRTSTR
@@ -366,17 +410,17 @@ START_EXIT_MSG:
 	OR	A
 	JR	Z, START_EXIT_DONE
 	LD	DE, MSG_EXITING
-	CALL	PRTLN
+	CALL	PRTSTR
+	CALL	CRLF
 START_EXIT_DONE:
 	; Return to CP/M via BDOS system reset (function 0).
 	LD	C, 0
 	JP	BDOS
 
-; Mute PSG output on exit. TurboSound uses per-chip port pairs, not PSG_WRITE_ROUTED.
+; Mute PSG on exit / track switch. Always write mute (do not gate on
+; PSG_TOUCHED): a skipped mute leaves the last note sustaining after a crash
+; or a reload that never ticked.
 START_EXIT_SILENCE:
-	LD	A, (PSG_TOUCHED)
-	OR	A
-	RET	Z
 	XOR	A
 	LD	(PSG_TOUCHED), A
 	LD	A, (TSFLAG)
@@ -389,18 +433,19 @@ START_EXIT_SILENCE:
 START_EXIT_SILENCE_ONE:
 	JP	PSG_MUTE_DIRECT
 
-; Milestone 1A: Load display config from VTUNE.CFG if present.
-; Config file format (binary, 5 bytes; written by vtunecfg.com):
+; Milestone 1A: Load display + AY config from VTUNE.CFG if present.
+; Config file format (binary; written by vtunecfg.com):
 ;   byte 0: magic = 0xA5
 ;   byte 1: DISP_MODE (0=plain, 1=VT100, 2=ANSI)
 ;   byte 2: flags (bit 0 = ANSI colour)
 ;   byte 3: rows (0 -> default 24)
 ;   byte 4: cols (0 -> default 80)
-;   byte 5: TS topology (0=auto, 1=dual-card, 2=single-card module;
-;           absent in old 5-byte files -> auto)
-; Missing file or invalid magic → DISP_MODE stays DISP_PLAIN.
-; No VT100/ANSI probing is attempted at runtime; the config file is
-; the sole authority on display capability.
+;   byte 5: TS topology (0=auto, 1=dual-card, 2=module;
+;           absent in old files -> auto)
+;   byte 6: primary AY card (0=auto, 1=MSX, 2=RC, 3=EB, 4=Coleco)
+;   byte 7: second AY card for dual-card (0=none, 1..4)
+; Missing file or invalid magic → DISP_MODE stays DISP_PLAIN, cards auto.
+; CLI (-msx/-rc/-eb/-coleco/-tsm) overrides CFG. No VT100/ANSI probing.
 ; Output: DISP_MODE is valid and stable for all subsequent display calls.
 #DEFINE CFG_MAGIC $A5
 DETECT_DISPLAY_MODE:
@@ -451,11 +496,28 @@ DETECT_DISP_ROWS_OK:
 	LD	A, 80
 DETECT_DISP_COLS_OK:
 	LD	(CFG_COLS), A
-	; Byte 5: TS topology (0=auto, 1=dual-card, 2=single-card module)
+	; Byte 5: TS topology. CLI (-tsm) wins: do not clobber a non-auto value.
+	LD	A, (TS_TOPOLOGY)
+	OR	A
+	JR	NZ, DETECT_DISP_CARDS
 	LD	A, (DMA_BUFFER+5)
 	CP	3
-	JR	NC, DETECT_DISP_CLOSE	; out of range — keep auto
+	JR	NC, DETECT_DISP_CARDS	; out of range — keep auto
 	LD	(TS_TOPOLOGY), A
+DETECT_DISP_CARDS:
+	; Bytes 6-7: AY cards (old files zero-filled → auto / none)
+	LD	A, (DMA_BUFFER+6)
+	CP	5
+	JR	C, DETECT_DISP_C1_OK
+	XOR	A
+DETECT_DISP_C1_OK:
+	LD	(CFG_AY_CARD1), A
+	LD	A, (DMA_BUFFER+7)
+	CP	5
+	JR	C, DETECT_DISP_C2_OK
+	XOR	A
+DETECT_DISP_C2_OK:
+	LD	(CFG_AY_CARD2), A
 DETECT_DISP_CLOSE:
 	; Close config file (BDOS 10h)
 	LD	DE, CFG_FCB
@@ -478,16 +540,18 @@ HEAPENDB_INIT:
 	LD	(HEAPENDB), A
 	RET
 
-; Zero player state + module area before load (VARS..HEAPEND-1).
-; Starts at VARS, NOT HEAP: the parse buffers (FCB_WORK, ARG_BUFFER, ...) and
-; BULBA_PORTS sit below VARS and are populated before this runs — clearing the
-; whole heap would wipe the parsed filename FCB and the detected ports.
+; Zero player + TS context before load (VARS .. MUSIC_BUF-1).
+; Starts at VARS, NOT HEAP: parse buffers / TRACK_LIST / BULBA_PORTS sit
+; below VARS and must survive. Must NOT clear through HEAPEND ($C000): that
+; range includes the CP/M stack, so an LDIR there on track reload corrupts
+; return addresses (crash + sustained last note). MUSIC_BUF is overwritten
+; by LOAD_MUSIC_FILE.
 HEAP_CLEAR:
 	LD	HL, VARS
 	XOR	A
 	LD	(HL), A
 	LD	DE, VARS + 1
-	LD	BC, HEAPEND - VARS - 1
+	LD	BC, MUSIC_BUF - VARS - 1
 	LDIR
 	RET
 
@@ -592,57 +656,68 @@ SCAN_SWITCH_FCB:
 	JP	STRINDEX_FCB
 
 ; Scan command line for switches (any token order). Primary: $0081 like tune.com.
-; Table-driven: entry = signature ptr, variable ptr, value stored on match.
 SCAN_CMDLINE_SWITCHES:
-	LD	HL, SCAN_SW_TABLE
-SCAN_SW_ENTRY:
-	LD	E, (HL)
-	INC	HL
-	LD	D, (HL)
-	INC	HL
-	LD	A, E
-	OR	D
-	RET	Z			; end of table
-	PUSH	HL
-	CALL	SCAN_SWITCH_IN_CMD	; Z if found (DE preserved)
-	POP	HL
-	JR	NZ, SCAN_SW_SKIP
-	LD	E, (HL)
-	INC	HL
-	LD	D, (HL)
-	INC	HL
-	LD	A, (HL)
-	INC	HL
-	LD	(DE), A
-	JR	SCAN_SW_ENTRY
-SCAN_SW_SKIP:
-	INC	HL
-	INC	HL
-	INC	HL
-	JR	SCAN_SW_ENTRY
-
-SCAN_SW_TABLE:
-	.DW	MSG_SWITCH_LIST, RUN_MODE
-	.DB	RUNMODE_LIST
-	.DW	MSG_SWITCH_HELP, RUN_MODE
-	.DB	RUNMODE_HELP
-	.DW	MSG_SWITCH_CREDITS, RUN_MODE
-	.DB	RUNMODE_CREDITS
-	.DW	MSG_SWITCH_LOOP, LOOP_REQ	; applied once run mode is known
-	.DB	1
-	.DW	MSG_SWITCH_MSX, HW_DETECT_MODE
-	.DB	HW_MODE_MSX
-	.DW	MSG_SWITCH_RC, HW_DETECT_MODE
-	.DB	HW_MODE_RC
-	.DW	MSG_SWITCH_COLECO, HW_DETECT_MODE
-	.DB	HW_MODE_COLECO
-	.DW	MSG_SWITCH_EB, HW_DETECT_MODE
-	.DB	HW_MODE_EB
-	.DW	MSG_SWITCH_DELAY, DELAYMD
-	.DB	1
-	.DW	MSG_SWITCH_TSM, TS_TOPOLOGY
-	.DB	TS_TOPO_MODULE
-	.DW	0			; end marker
+	LD	DE, MSG_SWITCH_LIST
+	CALL	SCAN_SWITCH_IN_CMD
+	JR	NZ, SCAN_SW_NO_LIST
+	LD	A, RUNMODE_LIST
+	LD	(RUN_MODE), A
+SCAN_SW_NO_LIST:
+	LD	DE, MSG_SWITCH_HELP
+	CALL	SCAN_SWITCH_IN_CMD
+	JR	NZ, SCAN_SW_NO_HELP
+	LD	A, RUNMODE_HELP
+	LD	(RUN_MODE), A
+SCAN_SW_NO_HELP:
+	LD	DE, MSG_SWITCH_CREDITS
+	CALL	SCAN_SWITCH_IN_CMD
+	JR	NZ, SCAN_SW_NO_CREDITS
+	LD	A, RUNMODE_CREDITS
+	LD	(RUN_MODE), A
+SCAN_SW_NO_CREDITS:
+	LD	DE, MSG_SWITCH_LOOP
+	CALL	SCAN_SWITCH_IN_CMD
+	JR	NZ, SCAN_SW_NO_LOOP
+	LD	A, 1
+	LD	(LOOP_REQ), A		; applied once run mode is known
+SCAN_SW_NO_LOOP:
+	LD	DE, MSG_SWITCH_MSX
+	CALL	SCAN_SWITCH_IN_CMD
+	JR	NZ, SCAN_SW_NO_MSX
+	LD	A, HW_MODE_MSX
+	LD	(HW_DETECT_MODE), A
+SCAN_SW_NO_MSX:
+	LD	DE, MSG_SWITCH_RC
+	CALL	SCAN_SWITCH_IN_CMD
+	JR	NZ, SCAN_SW_NO_RC
+	LD	A, HW_MODE_RC
+	LD	(HW_DETECT_MODE), A
+SCAN_SW_NO_RC:
+	LD	DE, MSG_SWITCH_COLECO
+	CALL	SCAN_SWITCH_IN_CMD
+	JR	NZ, SCAN_SW_NO_COLECO
+	LD	A, HW_MODE_COLECO
+	LD	(HW_DETECT_MODE), A
+SCAN_SW_NO_COLECO:
+	LD	DE, MSG_SWITCH_EB
+	CALL	SCAN_SWITCH_IN_CMD
+	JR	NZ, SCAN_SW_NO_EB
+	LD	A, HW_MODE_EB
+	LD	(HW_DETECT_MODE), A
+SCAN_SW_NO_EB:
+	LD	DE, MSG_SWITCH_DELAY
+	CALL	SCAN_SWITCH_IN_CMD
+	JR	NZ, SCAN_SW_NO_DELAY
+	LD	A, 1
+	LD	(DELAYMD), A
+SCAN_SW_NO_DELAY:
+	LD	DE, MSG_SWITCH_TSM
+	CALL	SCAN_SWITCH_IN_CMD
+	JR	NZ, SCAN_SW_DONE
+	LD	A, TS_TOPO_MODULE
+	LD	(TS_TOPOLOGY), A
+SCAN_SW_DONE:
+	RET
 
 ; Z = 1 if A is NUL, CR, or CP/M end-of-line (high bit set on last byte).
 CMD_CHAR_END:
@@ -699,6 +774,11 @@ PARSE_CLR_ARG_BUF:
 	INC	HL
 	DJNZ	PARSE_CLR_ARG_BUF
 	CALL	SCAN_CMDLINE_SWITCHES
+	; Reject unknown -foo tokens even in -list/-help/-credits (those modes
+	; used to skip the token walk, so typos like -tms were silently ignored).
+	CALL	VALIDATE_SWITCH_TOKENS
+	OR	A
+	RET	NZ
 	LD	A, (RUN_MODE)
 	CP	RUNMODE_LIST
 	JR	Z, PARSE_CL_DONE
@@ -893,6 +973,8 @@ PARSE_TOK_DISPATCH:
 	LD	HL, ARG_SCRATCH
 	CALL	APPLY_IF_SWITCH
 	POP	HL
+	CP	2
+	JP	Z, PARSE_ERR_BAD_SWITCH
 	OR	A
 	JR	NZ, PARSE_TOK_SKIP_AFTER
 	LD	A, (PARSE_SWITCH_ONLY)
@@ -920,17 +1002,154 @@ PARSE_TOK_COPY:
 PARSE_TOK_SKIP_AFTER:
 	JP	PARSE_TOK_SKIP
 
-; HL = token. Switch flags were already applied by SCAN_CMDLINE_SWITCHES;
-; here we only classify: any token starting with '-' is a switch (A=1),
-; else a filename candidate (A=0).
+; HL = token. Returns A=0 filename, A=1 known switch, A=2 unknown switch.
 APPLY_IF_SWITCH:
 	LD	A, (HL)
 	CP	'-'
-	JR	Z, APPLY_IF_SWITCH_Y
+	JR	Z, APPLY_IF_SWITCH_CHK
 	XOR	A
+	RET
+APPLY_IF_SWITCH_CHK:
+	CALL	IS_KNOWN_SWITCH_TOKEN
+	OR	A
+	JR	Z, APPLY_IF_SWITCH_Y
+	LD	A, 2
 	RET
 APPLY_IF_SWITCH_Y:
 	LD	A, 1
+	RET
+
+; HL = NUL-terminated token. Z (A=0) if it exactly matches a known switch.
+IS_KNOWN_SWITCH_TOKEN:
+	LD	DE, MSG_SWITCH_LIST
+	CALL	SWITCH_TOKEN_EQ
+	RET	Z
+	LD	DE, MSG_SWITCH_HELP
+	CALL	SWITCH_TOKEN_EQ
+	RET	Z
+	LD	DE, MSG_SWITCH_CREDITS
+	CALL	SWITCH_TOKEN_EQ
+	RET	Z
+	LD	DE, MSG_SWITCH_LOOP
+	CALL	SWITCH_TOKEN_EQ
+	RET	Z
+	LD	DE, MSG_SWITCH_MSX
+	CALL	SWITCH_TOKEN_EQ
+	RET	Z
+	LD	DE, MSG_SWITCH_RC
+	CALL	SWITCH_TOKEN_EQ
+	RET	Z
+	LD	DE, MSG_SWITCH_COLECO
+	CALL	SWITCH_TOKEN_EQ
+	RET	Z
+	LD	DE, MSG_SWITCH_EB
+	CALL	SWITCH_TOKEN_EQ
+	RET	Z
+	LD	DE, MSG_SWITCH_DELAY
+	CALL	SWITCH_TOKEN_EQ
+	RET	Z
+	LD	DE, MSG_SWITCH_TSM
+	CALL	SWITCH_TOKEN_EQ
+	RET	Z
+	OR	$FF
+	RET
+
+; Exact case-insensitive match of token HL to needle DE (both must end together).
+; Z if equal. Preserves HL. Clobbers AF/BC/DE.
+SWITCH_TOKEN_EQ:
+	PUSH	HL
+	PUSH	DE
+SWITCH_TOKEN_EQ_LOOP:
+	LD	A, (DE)
+	OR	A
+	JR	Z, SWITCH_TOKEN_EQ_NEEDLE_END
+	PUSH	AF
+	CALL	TO_UPPER
+	LD	C, A
+	POP	AF
+	LD	A, (HL)
+	CALL	CMD_CHAR_END
+	JR	Z, SWITCH_TOKEN_EQ_NO
+	CALL	TO_UPPER
+	CP	C
+	JR	NZ, SWITCH_TOKEN_EQ_NO
+	INC	HL
+	INC	DE
+	JR	SWITCH_TOKEN_EQ_LOOP
+SWITCH_TOKEN_EQ_NEEDLE_END:
+	LD	A, (HL)
+	CALL	CMD_CHAR_END
+	JR	NZ, SWITCH_TOKEN_EQ_NO
+	POP	DE
+	POP	HL
+	XOR	A
+	RET
+SWITCH_TOKEN_EQ_NO:
+	POP	DE
+	POP	HL
+	OR	$FF
+	RET
+
+; Walk command-tail tokens; any -foo that is not a known switch → error.
+; Same tokenizer bounds as PARSE_TOKENS_FOR_FILENAME. Returns A=0 or ERR_*.
+VALIDATE_SWITCH_TOKENS:
+	CALL	GET_CMD_TAIL_LEN
+VAL_SW_SKIP:
+	LD	A, B
+	OR	A
+	JR	Z, VAL_SW_OK
+	LD	A, (HL)
+	CALL	CMD_CHAR_END
+	JR	Z, VAL_SW_OK
+	CP	' '
+	JR	Z, VAL_SW_ADV
+	CP	9
+	JR	Z, VAL_SW_ADV
+	JR	VAL_SW_TOKEN
+VAL_SW_ADV:
+	INC	HL
+	DEC	B
+	JR	VAL_SW_SKIP
+VAL_SW_TOKEN:
+	LD	DE, ARG_SCRATCH
+VAL_SW_UNQ:
+	LD	A, B
+	OR	A
+	JR	Z, VAL_SW_DISPATCH
+	LD	A, (HL)
+	CALL	CMD_CHAR_END
+	JR	Z, VAL_SW_DISPATCH
+	CP	' '
+	JR	Z, VAL_SW_DISPATCH
+	CP	9
+	JR	Z, VAL_SW_DISPATCH
+	LD	(DE), A
+	INC	DE
+	INC	HL
+	DEC	B
+	JR	VAL_SW_UNQ
+VAL_SW_DISPATCH:
+	XOR	A
+	LD	(DE), A
+	PUSH	HL
+	PUSH	BC
+	LD	HL, ARG_SCRATCH
+	LD	A, (HL)
+	CP	'-'
+	JR	NZ, VAL_SW_NEXT
+	CALL	IS_KNOWN_SWITCH_TOKEN
+	OR	A
+	JR	Z, VAL_SW_NEXT
+	POP	BC
+	POP	HL
+	LD	A, ERR_UNKNOWN_SWITCH
+	RET
+VAL_SW_NEXT:
+	POP	BC
+	POP	HL
+	JR	VAL_SW_SKIP
+VAL_SW_OK:
+	XOR	A
 	RET
 
 PARSE_ERR_NO_ARG:
@@ -939,6 +1158,10 @@ PARSE_ERR_NO_ARG:
 
 PARSE_ERR_TOO_MANY:
 	LD	A, ERR_TOO_MANY_ARGS
+	RET
+
+PARSE_ERR_BAD_SWITCH:
+	LD	A, ERR_UNKNOWN_SWITCH
 	RET
 
 ; Classify ARG_BUFFER extension as PTx or MYM.
@@ -1279,8 +1502,67 @@ PTX_MATCH_VORTEX_MUSIC:
 	LD	HL, MUSIC_BUF
 
 PTX_MATCH_VORTEX_HL:
-	LD	DE, PTX_SIG_VORTEX
-	JR	STRPREFIX_MATCH
+	LD	A, (HL)
+	CP	'V'
+	JR	NZ, PTX_VORTEX_BAD
+	INC	HL
+	LD	A, (HL)
+	CP	'o'
+	JR	NZ, PTX_VORTEX_BAD
+	INC	HL
+	LD	A, (HL)
+	CP	'r'
+	JR	NZ, PTX_VORTEX_BAD
+	INC	HL
+	LD	A, (HL)
+	CP	't'
+	JR	NZ, PTX_VORTEX_BAD
+	INC	HL
+	LD	A, (HL)
+	CP	'e'
+	JR	NZ, PTX_VORTEX_BAD
+	INC	HL
+	LD	A, (HL)
+	CP	'x'
+	JR	NZ, PTX_VORTEX_BAD
+	INC	HL
+	LD	A, (HL)
+	CP	' '
+	JR	NZ, PTX_VORTEX_BAD
+	INC	HL
+	LD	A, (HL)
+	CP	'T'
+	JR	NZ, PTX_VORTEX_BAD
+	INC	HL
+	LD	A, (HL)
+	CP	'r'
+	JR	NZ, PTX_VORTEX_BAD
+	INC	HL
+	LD	A, (HL)
+	CP	'a'
+	JR	NZ, PTX_VORTEX_BAD
+	INC	HL
+	LD	A, (HL)
+	CP	'c'
+	JR	NZ, PTX_VORTEX_BAD
+	INC	HL
+	LD	A, (HL)
+	CP	'k'
+	JR	NZ, PTX_VORTEX_BAD
+	INC	HL
+	LD	A, (HL)
+	CP	'e'
+	JR	NZ, PTX_VORTEX_BAD
+	INC	HL
+	LD	A, (HL)
+	CP	'r'
+	JR	NZ, PTX_VORTEX_BAD
+	XOR	A
+	RET
+
+PTX_VORTEX_BAD:
+	LD	A, 1
+	RET
 
 PTX_MATCH_PROTRACKER_HEADER:
 	LD	HL, DMA_BUFFER
@@ -1290,24 +1572,53 @@ PTX_MATCH_PROTRACKER_MUSIC:
 	LD	HL, MUSIC_BUF
 
 PTX_MATCH_PROTRACKER_HL:
-	LD	DE, PTX_SIG_PROTRACKER
-
-; Exact prefix match: HL = candidate, DE = NUL-terminated signature.
-; Returns A=0 (Z) on match, A=1 (NZ) on mismatch — same contract as the
-; former inline per-char matchers, ~110 bytes smaller for the two of them.
-STRPREFIX_MATCH:
-	LD	A, (DE)
-	OR	A
-	JR	Z, STRPREFIX_OK
-	CP	(HL)
-	JR	NZ, STRPREFIX_BAD
+	LD	A, (HL)
+	CP	'P'
+	JR	NZ, PTX_PROTRACKER_BAD
 	INC	HL
-	INC	DE
-	JR	STRPREFIX_MATCH
-STRPREFIX_OK:
+	LD	A, (HL)
+	CP	'r'
+	JR	NZ, PTX_PROTRACKER_BAD
+	INC	HL
+	LD	A, (HL)
+	CP	'o'
+	JR	NZ, PTX_PROTRACKER_BAD
+	INC	HL
+	LD	A, (HL)
+	CP	'T'
+	JR	NZ, PTX_PROTRACKER_BAD
+	INC	HL
+	LD	A, (HL)
+	CP	'r'
+	JR	NZ, PTX_PROTRACKER_BAD
+	INC	HL
+	LD	A, (HL)
+	CP	'a'
+	JR	NZ, PTX_PROTRACKER_BAD
+	INC	HL
+	LD	A, (HL)
+	CP	'c'
+	JR	NZ, PTX_PROTRACKER_BAD
+	INC	HL
+	LD	A, (HL)
+	CP	'k'
+	JR	NZ, PTX_PROTRACKER_BAD
+	INC	HL
+	LD	A, (HL)
+	CP	'e'
+	JR	NZ, PTX_PROTRACKER_BAD
+	INC	HL
+	LD	A, (HL)
+	CP	'r'
+	JR	NZ, PTX_PROTRACKER_BAD
+	INC	HL
+	LD	A, (HL)
+	CP	' '
+	JR	NZ, PTX_PROTRACKER_BAD
 	XOR	A
 	RET
-STRPREFIX_BAD:
+
+PTX_PROTRACKER_BAD:
 	LD	A, 1
 	RET
 
@@ -1358,6 +1669,9 @@ ENGINE_INIT_PTX_PROTRACKER:
 	LD	(PTX_VARIANT), A
 
 ENGINE_INIT_PTX_BULBA:
+	; Mute using still-valid TSFLAG/TS_DUALHW from the previous track,
+	; then clear those flags for the new init.
+	CALL	START_EXIT_SILENCE
 	XOR	A
 	LD	(PTX_DONE), A
 	LD	(TSFLAG), A
@@ -1368,7 +1682,6 @@ ENGINE_INIT_PTX_BULBA:
 	LD	(PTX_STATE_POS), A
 	LD	(PTX_STATE_POS+1), A
 	CALL	BULBA_SYNC_PORTS
-	CALL	PSG_MUTE_DIRECT		; Clean PSG state before engine init
 	CALL	PTX_DETECT_TURBOSOUND
 	OR	A
 	JR	Z, ENGINE_INIT_PTX_SINGLE
@@ -1381,6 +1694,10 @@ ENGINE_INIT_PTX_BULBA:
 	RET
 
 ENGINE_INIT_PTX_SINGLE:
+	; Playlist re-init: prior track has mutated Bulba self-mod. Dual TS_INIT
+	; reloads TS_CTXTMPL; single path must too or INIT jumps into garbage
+	; (crash on RL2WOF→RL2WOFTS when module dual is refused).
+	CALL	TS_LOAD_TMPL
 	LD	A, BULBA_SETUP_INIT
 	LD	(BULBA_START + 10), A
 	CALL	BULBA_START
@@ -1680,7 +1997,8 @@ PRINT_TRACK_UNSEL:
 PRINT_TRACK_NAME:
 	LD	D, H
 	LD	E, L
-	CALL	PRTLN
+	CALL	PRTSTR
+	CALL	CRLF
 	POP	HL
 	LD	DE, TRACK_NAME_LEN
 	ADD	HL, DE
@@ -1809,31 +2127,36 @@ PSG_IO_EXIT_DONE:
 
 ; Bulk-write 14 AY registers from (HL). Matches tune.com ROUT/LOUT for RomWBW.
 ; Input: HL = register block (regs 0-13).
+; Z180: OUT (C),A / OUTI use full BC as the port — B must be 0 or the write
+; hits BC = (B<<8)|C (e.g. B=$0D → high byte aliases SC126 LED latch decode).
 PSG_ROUT_BLOCK:
 	LD	A, 1
 	LD	(PSG_TOUCHED), A
 	DI
-	CALL	PSG_IO_SLOW_ENTER
+	CALL	TSMOD_SLOWIO		; slow enter + optional module chip select
 	LD	A, (PSG_DATA_PORT)
 	LD	D, A
 	LD	A, (PSG_REG_PORT)
 	LD	E, A
-	LD	B, 13
 	XOR	A
-	LD	C, E
 PSG_ROUT_LOOP:
+	LD	C, E
+	LD	B, 0
 	OUT	(C), A
 	LD	C, D
-	OUTI
-	LD	C, E
+	LD	B, 0
+	OUTI				; (C)<-(HL), HL++, B--
 	INC	A
 	CP	13
 	JR	NZ, PSG_ROUT_LOOP
+	LD	C, E
+	LD	B, 0
 	OUT	(C), A
 	LD	A, (HL)
 	AND	A
 	JP	M, PSG_ROUT_DONE
 	LD	C, D
+	LD	B, 0
 	OUT	(C), A
 PSG_ROUT_DONE:
 	CALL	PSG_IO_SLOW_EXIT
@@ -1926,6 +2249,9 @@ PLAYBACK_TICK_DONE:
 #DEFINE PT3SIG2 '3'
 #DEFINE PT3SIG3 '!'
 #DEFINE PTX_PATCHSZ 52
+; Bulba VARS slice size (VAR0END-VARS = ChanA/B/C+misc+VT_+16). Keep in sync
+; with the VARS layout below; used for .DS before the EQU would be visible.
+#DEFINE PTX_CTXSIZ 109
 #DEFINE TS_VTNT_SIZ 432		; VT_+16..VT_+255 (240) + NT_ (192)
 
 PTX_ENGINE_TICK:
@@ -1948,10 +2274,25 @@ PTX_ENGINE_TICK_AFTER_QUARK:
 	JP	PLAYBACK_TICK_DONE
 
 ; tune.com PTXLP / PTxPlay.txt: SETUP bit7 or PTX_DONE when module order finishes.
+; Dual TurboSound: both instances must report bit7 (old_vibetune PTXLP / TSSET1+TSSET2).
 PTX_ENGINE_CHECK_END:
 	LD	A, (PTX_DONE)
 	OR	A
 	JR	NZ, PTX_ENGINE_STOP
+	LD	A, (TSFLAG)
+	OR	A
+	JR	Z, PTX_ENGINE_CHECK_SINGLE
+	LD	A, (TS_DUALHW)
+	OR	A
+	JR	Z, PTX_ENGINE_CHECK_SINGLE
+	LD	A, (TSSET1)
+	BIT	7, A
+	RET	Z
+	LD	A, (TSSET2)
+	BIT	7, A
+	RET	Z
+	JR	PTX_ENGINE_STOP
+PTX_ENGINE_CHECK_SINGLE:
 	LD	A, (BULBA_START + 10)
 	BIT	7, A
 	RET	Z
@@ -1973,42 +2314,118 @@ TS_PORTS_SETUP:
 
 	LD	A, (TS_TOPOLOGY)
 	CP	TS_TOPO_MODULE
-	JR	Z, TS_PORTS_SETUP_MODULE
+	JP	Z, TS_PORTS_SETUP_MODULE
+	CP	TS_TOPO_DUALCARD
+	JP	Z, TS_PORTS_CFG_DUAL
 
+	; Auto: try a second real AY (HBIOS), then Hi-Z ⇒ module.
+	CALL	TS_PORTS_TRY_DUALCARD
+	LD	A, (TS_DUALHW)
+	OR	A
+	RET	NZ
+	JP	TS_PORTS_AUTO_MODULE
+
+; CFG dual-card: chip1 = current play ports, chip2 = CFG_AY_CARD2.
+; RomWBW does not enumerate two AYs; Z180 must not guess alien pairs.
+TS_PORTS_CFG_DUAL:
+	LD	A, (CFG_AY_CARD2)
+	OR	A
+	RET	Z			; no second card configured
+	CALL	AY_CARD_TO_TS2
+	OR	A
+	RET	NZ			; unknown / auto id
+	; Refuse chip2 ports inside the Z180 internal I/O window.
+	LD	A, (TS_PORT2_RSEL)
+	CALL	AY_PORT_IN_Z180_WIN
+	RET	NZ
+	LD	A, (TS_PORT2_RDAT)
+	CALL	AY_PORT_IN_Z180_WIN
+	RET	NZ
+	CALL	TS_ASSIGN_DESC2
+	CALL	TS_VERIFY_DUAL_PORTS
+	RET	NZ
+	LD	A, 1
+	LD	(TS_DUALHW), A
+	RET
+
+; Map CFG card id in A to TS_PORT2_*. A=0 ok, A!=0 if auto/invalid.
+AY_CARD_TO_TS2:
+	CP	HW_MODE_MSX
+	JR	Z, AY_CARD_TS2_MSX
+	CP	HW_MODE_RC
+	JR	Z, AY_CARD_TS2_RC
+	CP	HW_MODE_EB
+	JR	Z, AY_CARD_TS2_EB
+	CP	HW_MODE_COLECO
+	JR	Z, AY_CARD_TS2_COLECO
+	LD	A, 1
+	RET
+AY_CARD_TS2_MSX:
+	LD	A, $A0
+	LD	(TS_PORT2_RSEL), A
+	LD	A, $A1
+	LD	(TS_PORT2_RDAT), A
+	XOR	A
+	RET
+AY_CARD_TS2_RC:
+	LD	A, $D8
+	LD	(TS_PORT2_RSEL), A
+	LD	A, $D0
+	LD	(TS_PORT2_RDAT), A
+	XOR	A
+	RET
+AY_CARD_TS2_EB:
+	LD	A, $68
+	LD	(TS_PORT2_RSEL), A
+	LD	A, $60
+	LD	(TS_PORT2_RDAT), A
+	XOR	A
+	RET
+AY_CARD_TS2_COLECO:
+	LD	A, $50
+	LD	(TS_PORT2_RSEL), A
+	LD	A, $51
+	LD	(TS_PORT2_RDAT), A
+	XOR	A
+	RET
+
+; Probe HBIOS / tune-style fallback for a second distinct AY. Sets TS_DUALHW
+; on success. On Z180, skip the non-readback card swap (unsafe I/O window).
+TS_PORTS_TRY_DUALCARD:
 	LD	HL, ($FFFC)
 	LD	A, 'W'
 	CP	(HL)
-	RET	NZ
+	JR	NZ, TS_PORTS_TRY_PROBE
 	INC	HL
 	LD	A, ~'W'
 	CP	(HL)
-	JR	NZ, TS_PORTS_SETUP_PROBE
+	JR	NZ, TS_PORTS_TRY_PROBE
 
 	LD	C, 1			; Query sound unit 1 (second device)
 	LD	B, BF_SNDQUERY
 	LD	E, BF_SNDQ_DEV
 	RST	08
 	OR	A
-	JR	NZ, TS_PORTS_SETUP_PROBE
+	JR	NZ, TS_PORTS_TRY_PROBE
 	LD	A, B
 	CP	SND_AY38910
-	JR	NZ, TS_PORTS_SETUP_PROBE
+	JR	NZ, TS_PORTS_TRY_PROBE
 
 	LD	A, (TS_PORT1_RSEL)
 	CP	D
-	JR	NZ, TS_PORTS_SETUP_DISTINCT
+	JR	NZ, TS_PORTS_TRY_DISTINCT
 	LD	A, (TS_PORT1_RDAT)
 	CP	E
-	JR	Z, TS_PORTS_SETUP_PROBE
+	JR	Z, TS_PORTS_TRY_PROBE
 
-TS_PORTS_SETUP_DISTINCT:
+TS_PORTS_TRY_DISTINCT:
 	LD	A, D
 	LD	(TS_PORT2_RSEL), A
 	LD	A, E
 	LD	(TS_PORT2_RDAT), A
 	JP	TS_PORTS_SETUP_DUAL_OK
 
-TS_PORTS_SETUP_PROBE:
+TS_PORTS_TRY_PROBE:
 	; Tune-style fallback for mixed-card systems: on non-Z180 platforms,
 	; select the alternate standard card without readback probing.
 	LD	A, (HBIOS_PLATFORM_ID)
@@ -2048,13 +2465,78 @@ TS_PORTS_SETUP_DUAL_OK:
 	LD	(TS_DUALHW), A
 	RET
 
-; Single-card dual-AVR module: one port pair, both chips reached via
-; 0xFF/0xFE select latches (tsmodule.inc). No probing possible (the module
-; is Hi-Z on reads) - the user declared the topology via CFG/switch.
-TS_PORTS_SETUP_MODULE:
+; Auto-detect dual-AVR module: restore one port pair, Hi-Z ⇒ module dual.
+; Sets TS_TOPOLOGY=MODULE so SETPORTS/SLOWIO/mute use FF/FE.
+TS_PORTS_AUTO_MODULE:
+	LD	A, (TS_PORT1_RSEL)
+	LD	(TS_PORT2_RSEL), A
+	LD	A, (TS_PORT1_RDAT)
+	LD	(TS_PORT2_RDAT), A
 	CALL	TS_ASSIGN_DESC2
+	CALL	TSMOD_PROBE_CONFIGURED
+	OR	A
+	RET	Z			; readable AY → leave topology auto, dualhw=0
+	LD	A, TS_TOPO_MODULE
+	LD	(TS_TOPOLOGY), A
 	LD	A, 1
 	LD	(TS_DUALHW), A
+	RET
+
+; Explicit -tsm / CFG module: one port pair, both chips via 0xFF/0xFE.
+;
+; The module is Hi-Z on reads — HBIOS/auto detection cannot see it — so CLI
+; port forces (-msx/-rc/-eb/-coleco) are normal when the build's default ports
+; are wrong. Enable dual when the *configured* play ports look Hi-Z (module or
+; empty). Readable AY on those ports → real chip → chip 1 only (FF/FE on a
+; real AY overlays both streams). Do not shotgun-probe foreign pairs.
+TS_PORTS_SETUP_MODULE:
+	CALL	TS_ASSIGN_DESC2
+	CALL	TSMOD_PROBE_CONFIGURED
+	OR	A
+	RET	Z			; readable on play ports → leave TS_DUALHW=0
+	LD	A, 1
+	LD	(TS_DUALHW), A
+	RET
+
+; Probe only PSG_REG_PORT/PSG_DATA_PORT. MSX also tries RIN=$A0 if $A2 fails.
+; A=0 if readable AY, A!=0 if Hi-Z/empty. Clobbers BC/DE.
+TSMOD_PROBE_CONFIGURED:
+	LD	A, (PSG_REG_PORT)
+	LD	B, A
+	LD	A, (PSG_DATA_PORT)
+	LD	C, A
+	CALL	TSMOD_RIN_FROM_RSEL
+	CALL	PROBE_AY_PORTS
+	OR	A
+	RET	Z
+	LD	A, (PSG_REG_PORT)
+	CP	$A0
+	JR	NZ, TSMOD_PROBE_CFG_NONE
+	LD	B, $A0
+	LD	C, $A1
+	LD	D, $A0			; 2-port cards: read via RSEL
+	CALL	PROBE_AY_PORTS
+	OR	A
+	RET	Z
+TSMOD_PROBE_CFG_NONE:
+	OR	$FF
+	RET
+
+; Map detected RSEL to the probe RIN port (same table as PROBE_HARDWARE_CONFIG).
+; Returns D = RIN. Clobbers A.
+TSMOD_RIN_FROM_RSEL:
+	LD	A, (PSG_REG_PORT)
+	CP	$A0			; MSX
+	JR	NZ, TSMOD_RIN_NOT_MSX
+	LD	D, $A2
+	RET
+TSMOD_RIN_NOT_MSX:
+	CP	$51			; Coleco
+	JR	NZ, TSMOD_RIN_SAME
+	LD	D, $52
+	RET
+TSMOD_RIN_SAME:
+	LD	D, A			; EB/RC: RIN = RSEL
 	RET
 
 TS_ASSIGN_DESC1:
@@ -2121,25 +2603,32 @@ TS_SETPORTS1:
 	LD	(BULBA_PORTS + 1), A
 	LD	A, (TS_TOPOLOGY)
 	CP	TS_TOPO_MODULE
-	RET	NZ
+	JR	Z, TS_SETPORTS1_MOD
+	XOR	A
+	LD	(TSMOD_CURSEL), A	; dual-card: no FF/FE latch
+	RET
+TS_SETPORTS1_MOD:
 	LD	A, (TS_PORT1_RSEL)	; module: keep PSG globals on the pair too
 	LD	(PSG_REG_PORT), A
 	LD	A, (TS_PORT1_RDAT)
 	LD	(PSG_DATA_PORT), A
-	LD	A, $FF		; module: select chip 0
-	JP	TSMOD_SELECT
+	LD	A, $FF			; chip 0; ROUT/SLOWIO latches before dump
+	LD	(TSMOD_CURSEL), A
+	RET
 
 TS_SETPORTS2:
 	LD	A, (TS_TOPOLOGY)
 	CP	TS_TOPO_MODULE
 	JR	Z, TS_SETPORTS2_MOD
+	XOR	A
+	LD	(TSMOD_CURSEL), A
 	LD	A, (TS_PORT2_RSEL)
 	LD	(BULBA_PORTS + 0), A
 	LD	A, (TS_PORT2_RDAT)
 	LD	(BULBA_PORTS + 1), A
 	RET
 TS_SETPORTS2_MOD:
-	; module: same single port pair as chip 0, select chip 1
+	; module: same single port pair as chip 0; ROUT latches FE before dump
 	LD	A, (TS_PORT1_RSEL)
 	LD	(BULBA_PORTS + 0), A
 	LD	(PSG_REG_PORT), A
@@ -2147,13 +2636,28 @@ TS_SETPORTS2_MOD:
 	LD	(BULBA_PORTS + 1), A
 	LD	(PSG_DATA_PORT), A
 	LD	A, $FE
-	JP	TSMOD_SELECT
+	LD	(TSMOD_CURSEL), A
+	RET
+
+; Capture pristine Bulba patch bytes (+ zeroed VARS) into TS_CTXTMPL_*.
+; Call once at startup before any INIT/PLAY. Template must survive HEAP_CLEAR
+; (stored pre-VARS) so list-mode dual re-init cannot re-snapshot dirty self-mod.
+TS_CAPTURE_PRISTINE:
+	LD	HL, VARS
+	XOR	A
+	LD	(HL), A
+	LD	DE, VARS + 1
+	LD	BC, PTX_CTXSIZ - 1
+	LDIR
+	JP	CTX_SAVE_TMPL
 
 TS_INIT:
 	LD	A, (TS_DUALHW)
 	OR	A
 	RET	Z
-	CALL	CTX_SAVE_TMPL
+	; Never CTX_SAVE_TMPL here: after a prior track the self-mod is dirty,
+	; and HEAP_CLEAR has zeroed any heap-resident template. Always reload
+	; the boot-time pristine snapshot before each chip INIT.
 	CALL	TS_SETPORTS1
 	CALL	TS_LOAD_TMPL
 	LD	A, BULBA_SETUP_INIT
@@ -2161,6 +2665,8 @@ TS_INIT:
 	LD	HL, MUSIC_BUF
 	CALL	BULBA_START + 3
 	CALL	TS_SAVE_CTX1
+	LD	A, (BULBA_START + 10)
+	LD	(TSSET1), A
 
 	CALL	TS_SETPORTS2
 	CALL	TS_LOAD_TMPL
@@ -2170,7 +2676,10 @@ TS_INIT:
 	LD	DE, (TS_OFF2)
 	ADD	HL, DE
 	CALL	BULBA_START + 3
-	JP	TS_SAVE_CTX2
+	CALL	TS_SAVE_CTX2
+	LD	A, (BULBA_START + 10)
+	LD	(TSSET2), A
+	RET
 
 TS_PLAYQUARK:
 	LD	A, (TS_DUALHW)
@@ -2180,15 +2689,15 @@ TS_PLAYQUARK:
 	CALL	TS_SETPORTS1
 	CALL	BULBA_START + 5
 	CALL	TS_SAVE_CTX1
-	CALL	PTX_ENGINE_CHECK_END
-	LD	A, (PLAY_STATE)
-	CP	PLAY_STOPPED
-	RET	Z
+	LD	A, (BULBA_START + 10)
+	LD	(TSSET1), A
 	CALL	TS_LOAD_CTX2
 	CALL	TS_SETPORTS2
 	CALL	BULBA_START + 5
 	CALL	TS_SAVE_CTX2
-	JP	PTX_ENGINE_CHECK_END
+	LD	A, (BULBA_START + 10)
+	LD	(TSSET2), A
+	RET
 
 ; Hard-mute both TurboSound chips via detected port pairs (not chip-1 globals only).
 TS_MUTE_BOTH_HARDWARE:
@@ -2269,7 +2778,11 @@ TS_LOAD_CTX2:
 	RET
 
 PTX_PATCHTBL:
-	; SETUP (bit7=song ended) intentionally omitted — host-owned; must not swap per chip.
+	; Per-chip SETUP (bit7=order finished) — required for TurboSound dual so
+	; chip1's end flag does not contaminate chip2's player state. Host end
+	; detect uses TSSET1/TSSET2 (both bit7) like old_vibetune PTXLP.
+	.DW	SETUP
+	.DB	1
 	.DW	PTDECOD+1
 	.DB	2
 	.DW	PsCalc
@@ -2681,6 +3194,10 @@ MAIN_LOOP:
 	JP	Z, MAIN_QUIT
 	CP	KEY_PAUSE
 	JP	Z, MAIN_PAUSE_TOGGLE
+	CP	KEY_ENTER
+	JP	Z, MAIN_ENTER_PLAY
+	CP	KEY_ENTER_LF
+	JP	Z, MAIN_ENTER_PLAY
 	CP	KEY_NEXT
 	JP	Z, MAIN_NEXT
 	CP	KEY_NEXT_L
@@ -2715,20 +3232,26 @@ MAIN_LOOP:
 	JP	Z, MAIN_NAV_RIGHT
 	JP	MAIN_LOOP_NODELAY
 
-; Esc in UI mode may start an arrow-key sequence; decode before quitting.
+; Esc may start an arrow-key CSI (ESC [ A/B/C/D). In playlist mode always
+; probe the sequence before quitting — plain -list used to treat Esc as
+; immediate quit, so arrow keys never navigated (help text promised they do).
 MAIN_ESC:
-	LD	A, (UI_ACTIVE)
+	LD	A, (TRACK_COUNT)
 	OR	A
-	JP	Z, MAIN_QUIT
+	JR	Z, MAIN_ESC_QUIT		; direct-file: bare Esc quits
 	CALL	UI_ESC_SEQ
 	OR	A
-	JP	Z, MAIN_QUIT		; bare Esc
+	JR	Z, MAIN_ESC_QUIT		; bare Esc
 	CP	2
 	JP	Z, MAIN_DEL_PRESS	; ESC [ 3 ~ = delete key
+	CP	3
+	JP	Z, MAIN_ENTER_PLAY	; ESC O M = keypad Enter
 	LD	A, (UI_IDXTMP)
 	CP	$FF
-	JP	NZ, MAIN_NAV_GO	; arrow key -> move
+	JP	NZ, MAIN_NAV_GO		; arrow key -> move
 	JP	MAIN_LOOP_NODELAY	; other sequence — swallowed
+MAIN_ESC_QUIT:
+	JP	MAIN_QUIT
 
 ; Triple-DEL arms deletion of the selected track (playlist mode only).
 MAIN_DEL_PRESS:
@@ -2756,14 +3279,16 @@ MAIN_DELETE_ATTEMPT:
 	JR	Z, MAIN_DEL_PROMPT
 	LD	A, PLAY_PAUSED
 	LD	(PLAY_STATE), A
-	CALL	PSG_MIXER_OFF
+	CALL	PAUSE_SILENCE
 MAIN_DEL_PROMPT:
 	LD	A, (UI_ACTIVE)
 	OR	A
 	JR	Z, MAIN_DEL_PROMPT_PLAIN
-	LD	B, UI_ROW_PLAY
+	CALL	UI_FOOTER_STATE_ROW
+	JR	C, MAIN_DEL_PROMPT_PLAIN
+	PUSH	BC
 	CALL	UI_CLR_ROW
-	LD	B, UI_ROW_PLAY
+	POP	BC
 	LD	C, 1
 	CALL	TCFG_ANSI_AT
 	CALL	TCFG_COL_PRM
@@ -2807,9 +3332,11 @@ MAIN_DEL_YES:
 	OR	A
 	JR	Z, MAIN_DEL_YES_PLAIN
 	CALL	TCFG_COL_RST
-	LD	B, UI_ROW_PLAY
+	CALL	UI_FOOTER_STATE_ROW
+	JR	C, MAIN_DEL_YES_PLAIN
+	PUSH	BC
 	CALL	UI_CLR_ROW
-	LD	B, UI_ROW_PLAY
+	POP	BC
 	LD	C, 1
 	CALL	TCFG_ANSI_AT
 	JR	MAIN_DEL_YES2
@@ -2915,7 +3442,7 @@ MAIN_PAUSE_TOGGLE:
 	JR	NZ, MAIN_RESUME
 	LD	A, PLAY_PAUSED
 	LD	(PLAY_STATE), A
-	CALL	PSG_MIXER_OFF
+	CALL	PAUSE_SILENCE
 	LD	A, STATUS_PAUSED
 	LD	(STATUS_MSG_PENDING), A
 	JP	MAIN_LOOP_NODELAY
@@ -2936,7 +3463,26 @@ MAIN_RESUME_PLAY:
 	LD	(PLAY_STATE), A
 	LD	A, STATUS_PLAYING
 	LD	(STATUS_MSG_PENDING), A
-	JR	MAIN_LOOP_NODELAY
+	JP	MAIN_LOOP_NODELAY
+
+; Enter: clear pause and play the track under '>'.
+MAIN_ENTER_PLAY:
+	LD	A, (TRACK_COUNT)
+	OR	A
+	JP	Z, MAIN_LOOP_NODELAY	; direct-file mode: ignore
+	XOR	A
+	LD	(NAV_DEBOUNCE), A
+	LD	A, PLAY_PLAYING
+	LD	(NAV_SAVED_STATE), A
+	LD	(PLAY_STATE), A		; clear pause immediately
+	LD	A, STATUS_PLAYING	; overwrite any stale STATUS_PAUSED
+	LD	(STATUS_MSG_PENDING), A
+	JP	MAIN_RELOAD_TRACK
+
+; Hard-mute both chips (TS dual / module FF/FE) or the single AY.
+; PSG_MIXER_OFF only hits routed ports and leaves module chip2 sustaining.
+PAUSE_SILENCE:
+	JP	START_EXIT_SILENCE
 
 MAIN_NEXT:
 	LD	A, (TRACK_COUNT)
@@ -3103,7 +3649,8 @@ PDS_PAUSED:
 	LD	A, (UI_ACTIVE)
 	OR	A
 	JR	Z, PDS_PAUSED_PLAIN
-	JP	UI_STATUS_PAUSED
+	CALL	UI_STATUS_PAUSED
+	RET
 PDS_PAUSED_PLAIN:
 	LD	DE, MSG_STATE_PAUSED
 	JR	PDS_EMIT
@@ -3111,16 +3658,19 @@ PDS_PLAYING:
 	LD	A, (UI_ACTIVE)
 	OR	A
 	JR	Z, PDS_PLAYING_PLAIN
-	JP	UI_STATUS_PLAYING
+	CALL	UI_STATUS_PLAYING
+	RET
 PDS_PLAYING_PLAIN:
 	LD	DE, MSG_STATE_PLAYING
 PDS_EMIT:
 	CALL	PRTSTR
 	JP	CRLF
 PDS_LOOP_UI:
-	JP	UI_SHOW_LOOP_STATUS
+	CALL	UI_SHOW_LOOP_STATUS
+	RET
 PDS_REDRAW:
-	JP	UI_FULL_REDRAW
+	CALL	UI_FULL_REDRAW
+	RET
 
 ; LOOP_TRACK: reload from disk (playlist) or re-init in memory (direct file).
 MAIN_RELOAD_CHECK:
@@ -3144,6 +3694,7 @@ MAIN_RELOAD_TRACK:
 	CALL	FORCED_DLY_FRAME_END
 	XOR	A
 	LD	(NAV_DEBOUNCE), A	; no pending debounce survives a reload
+	LD	(PLAY_STATE), A		; stop ticks for the duration of reload I/O
 	; Instant mute on track switch: the last register state would otherwise
 	; sustain on the PSG for the duration of the reload disk I/O (~300ms).
 	; TS-aware; no-op if the PSG is already silent (end-of-track advance).
@@ -3178,6 +3729,8 @@ MAIN_RELOAD_TRACK:
 MAIN_RELOAD_PLAYING:
 	LD	A, PLAY_PLAYING
 	LD	(PLAY_STATE), A
+	LD	A, STATUS_PLAYING
+	LD	(STATUS_MSG_PENDING), A
 MAIN_RELOAD_STATE_OK:
 	LD	A, PLAY_PLAYING
 	LD	(NAV_SAVED_STATE), A	; consume: default is always play
@@ -3193,12 +3746,22 @@ MAIN_RELOAD_STATE_OK:
 	JP	MAIN_LOOP
 MAIN_RELOAD_SHOW_PLAIN:
 	CALL	CRLF
-	CALL	PRINT_PLAYBACK_HW_CONFIG
-	CALL	PRINT_CURRENT_TRACK_STATUS
+	CALL	PRINT_TRACK_LIST	; refresh '>' marker on the new selection
+	CALL	CRLF
+	CALL	PRINT_INPUT_FILE_LINE
+	CALL	CRLF
 	CALL	PRINT_SONG_META_PLAIN
-	CALL	PRINT_AUDIO_MODE_STATUS
-	LD	DE, MSG_PLAYING
-	CALL	PRTLN
+	CALL	PRINT_PLAYBACK_HW_CONFIG
+	LD	A, (PLAY_STATE)
+	CP	PLAY_PAUSED
+	JR	Z, MAIN_RELOAD_SHOW_PAUSED
+	LD	DE, MSG_STATE_PLAYING
+	JR	MAIN_RELOAD_SHOW_STATE
+MAIN_RELOAD_SHOW_PAUSED:
+	LD	DE, MSG_STATE_PAUSED
+MAIN_RELOAD_SHOW_STATE:
+	CALL	PRTSTR
+	CALL	CRLF
 	JP	MAIN_LOOP
 
 ; Copy TRACK_SELECTED entry from TRACK_LIST to ARG_BUFFER.
@@ -3227,28 +3790,20 @@ COPY_SEL_CPY:
 	DJNZ	COPY_SEL_CPY
 	RET
 
-PRINT_CURRENT_TRACK_STATUS:
+; "Input file: NAME.EXT [Regular|TurboSound]" at current cursor. No CRLF.
+PRINT_INPUT_FILE_LINE:
 	LD	DE, MSG_INPUT
 	CALL	PRTSTR
 	LD	DE, ARG_BUFFER
-	CALL	PRTLN
-	LD	A, (FILE_ENGINE)
-	CP	ENGINE_PTX
-	JR	NZ, PRINT_CUR_MYM
-	LD	DE, MSG_CLASS_PTX
-	CALL	PRTLN
-	LD	A, (PTX_VARIANT)
-	CP	PTX_VARIANT_PROTRACKER
-	JR	Z, PRINT_CUR_PT3
-	LD	DE, MSG_PTX_VARIANT_VORTEX
-	JP	PRTLN
-PRINT_CUR_PT3:
-	LD	DE, MSG_PTX_VARIANT_PROTRACKER
-	JP	PRTLN
-PRINT_CUR_MYM:
-	LD	DE, MSG_CLASS_MYM
 	CALL	PRTSTR
-	JP	CRLF
+	LD	A, (TSFLAG)
+	OR	A
+	JR	NZ, PRINT_INPUT_TS
+	LD	DE, MSG_FTYPE_REG
+	JP	PRTSTR
+PRINT_INPUT_TS:
+	LD	DE, MSG_FTYPE_TS
+	JP	PRTSTR
 
 ; Determine runtime audio routing from loaded music content.
 ; PT3: enable TurboSound routing when a second embedded PT3 header exists.
@@ -3268,55 +3823,80 @@ UPDATE_AUDIO_MODE_FROM_MUSIC:
 
 ; Print detected hardware configuration (shared padded prefix + bare desc).
 PRINT_HARDWARE_CONFIG:
+	CALL	PRINT_HW_DESC_ONLY
+	CALL	CRLF
+	RET
+
+; "Hardware:   <desc>" — regular / non-TS path helper. No CRLF.
+PRINT_HW_DESC_ONLY:
 	LD	HL, (HW_CONFIG_DESC)
 	LD	DE, HW_DESC_UNKNOWN
 	LD	A, H
 	OR	L
-	JR	NZ, PRINT_HW_CONFIG_HAS_DESC
+	JR	NZ, PRINT_HW_DESC_HAS
 	EX	DE, HL
-PRINT_HW_CONFIG_HAS_DESC:
+PRINT_HW_DESC_HAS:
 	EX	DE, HL			; DE = desc
 	PUSH	DE
 	LD	DE, MSG_PFX_HW
 	CALL	PRTSTR
 	POP	DE
-	JP	PRTLN
+	JP	PRTSTR
 
-; Print hardware line(s) for playback. TurboSound files show both AY port sets.
-PRINT_PLAYBACK_HW_CONFIG:
+; One-line hardware summary at current cursor. No CRLF.
+; Regular file:           Hardware:   <card>
+; TS + AVR module dual:   Hardware:   <card> - TurboSound 0xFF/0xFE chip select in use
+; TS + one real AY:       Hardware:   Single-Card mode <card>
+; TS + two real AYs:      Hardware:   Dual-Card mode <card1> / <card2>
+PRINT_PLAYBACK_HW_LINE:
 	LD	A, (TSFLAG)
 	OR	A
-	JR	NZ, PRINT_PLAYBACK_HW_TS
-	JP	PRINT_HARDWARE_CONFIG
+	JR	NZ, PRINT_HW_TS
+	JP	PRINT_HW_DESC_ONLY
 
-PRINT_PLAYBACK_HW_TS:
+PRINT_HW_TS:
 	LD	A, (TS_DUALHW)
 	OR	A
-	JP	Z, PRINT_HARDWARE_CONFIG
+	JR	Z, PRINT_HW_TS_SINGLE
+	LD	A, (TS_TOPOLOGY)
+	CP	TS_TOPO_MODULE
+	JR	Z, PRINT_HW_TS_AVR
+	; Dual-card: two distinct real AYs
 	LD	DE, MSG_PFX_HW
 	CALL	PRTSTR
-	LD	DE, MSG_TS_HW_HDR
-	CALL	PRTLN
-	LD	DE, MSG_TS_CHIP1_PFX
+	LD	DE, MSG_HW_DUAL
 	CALL	PRTSTR
 	LD	DE, (TS_DESC1)
-	CALL	PRTLN
-	LD	DE, MSG_TS_CHIP2_PFX
+	CALL	PRTSTR
+	LD	DE, MSG_HW_SEP
 	CALL	PRTSTR
 	LD	DE, (TS_DESC2)
+	JP	PRTSTR
+
+PRINT_HW_TS_AVR:
+	CALL	PRINT_HW_DESC_ONLY
+	LD	DE, MSG_HW_AVR_TAG
+	JP	PRTSTR
+
+PRINT_HW_TS_SINGLE:
+	LD	DE, MSG_PFX_HW
 	CALL	PRTSTR
+	LD	DE, MSG_HW_SINGLE
+	CALL	PRTSTR
+	LD	HL, (HW_CONFIG_DESC)
+	LD	DE, HW_DESC_UNKNOWN
+	LD	A, H
+	OR	L
+	JR	NZ, PRINT_HW_TS_SINGLE1
+	EX	DE, HL
+PRINT_HW_TS_SINGLE1:
+	EX	DE, HL
+	JP	PRTSTR
+
+; Plain-mode wrapper: hardware line + CRLF.
+PRINT_PLAYBACK_HW_CONFIG:
+	CALL	PRINT_PLAYBACK_HW_LINE
 	JP	CRLF
-
-PRINT_AUDIO_MODE_STATUS:
-	LD	A, (AUDIO_OUT_MODE)
-	CP	AUDIO_OUT_TURBOSOUND
-	JR	Z, PRINT_AUDIO_MODE_TS
-	LD	DE, MSG_AUDIO_MODE_AY
-	JP	PRTLN
-
-PRINT_AUDIO_MODE_TS:
-	LD	DE, MSG_AUDIO_MODE_TS
-	JP	PRTLN
 
 ; Detect TurboSound-packed PT3 footer:
 ; "PT3!" <off2> "PT3!" <len2> "02TS"
@@ -3338,20 +3918,41 @@ PTX_DETECT_TURBOSOUND:
 	LD	IX, MUSIC_BUF
 
 PTX_TS_SCAN_LOOP:
-	PUSH	IX
-	POP	HL			; HL = candidate base
-	LD	DE, PTX_SIG_PT3X
-	CALL	STRPREFIX_MATCH		; "PT3!" at +0
+	LD	A, (IX+0)
+	CP	PT3SIG0
 	JP	NZ, PTX_TS_NEXT
-	INC	HL
-	INC	HL			; +4 matched, skip off2 -> base+6
-	LD	DE, PTX_SIG_PT3X
-	CALL	STRPREFIX_MATCH		; "PT3!" at +6
+	LD	A, (IX+1)
+	CP	PT3SIG1
 	JP	NZ, PTX_TS_NEXT
-	INC	HL
-	INC	HL			; +4 matched, skip len2 -> base+12
-	LD	DE, PTX_SIG_02TS
-	CALL	STRPREFIX_MATCH		; "02TS" at +12
+	LD	A, (IX+2)
+	CP	PT3SIG2
+	JP	NZ, PTX_TS_NEXT
+	LD	A, (IX+3)
+	CP	PT3SIG3
+	JP	NZ, PTX_TS_NEXT
+	LD	A, (IX+6)
+	CP	PT3SIG0
+	JP	NZ, PTX_TS_NEXT
+	LD	A, (IX+7)
+	CP	PT3SIG1
+	JP	NZ, PTX_TS_NEXT
+	LD	A, (IX+8)
+	CP	PT3SIG2
+	JP	NZ, PTX_TS_NEXT
+	LD	A, (IX+9)
+	CP	PT3SIG3
+	JP	NZ, PTX_TS_NEXT
+	LD	A, (IX+12)
+	CP	'0'
+	JP	NZ, PTX_TS_NEXT
+	LD	A, (IX+13)
+	CP	'2'
+	JP	NZ, PTX_TS_NEXT
+	LD	A, (IX+14)
+	CP	'T'
+	JP	NZ, PTX_TS_NEXT
+	LD	A, (IX+15)
+	CP	'S'
 	JP	NZ, PTX_TS_NEXT
 
 	LD	E, (IX+4)
@@ -3396,18 +3997,19 @@ PTX_TS_NEXT:
 	RET
 
 ; Milestone 9: Hardware detection and configuration
-; This routine detects or configures the PSG hardware ports based on:
-; 1. CLI override flags (-msx, -rc, -eb, -coleco)
-; 2. HBIOS platform detection (if available)
-; 3. Probing fallback (write/read register 2 test)
-; 4. Defaults (MSX standard as safe fallback)
-;
-; Stores port configuration in PSG_REG_PORT, PSG_DATA_PORT, PSG2_REG_PORT, PSG2_DATA_PORT.
-; Stores description pointer in HW_CONFIG_DESC.
-; Returns A=0 on success, A!=0 on failure.
-;
+; Priority: 1) CLI (-msx/-rc/-eb/-coleco)  2) VTUNE.CFG primary card
+;           3) HBIOS  4) probe  5) MSX default
 DETECT_HARDWARE_CONFIG:
 	CALL	CHECK_HW_CLI_FLAGS
+	OR	A
+	JR	NZ, DETECT_HW_TRY_CFG
+	LD	A, 1
+	LD	(PSG_HW_VALID), A
+	XOR	A
+	RET
+
+DETECT_HW_TRY_CFG:
+	CALL	APPLY_CFG_CARD1
 	OR	A
 	JR	NZ, DETECT_HW_TRY_HBIOS
 	LD	A, 1
@@ -3430,14 +4032,28 @@ DETECT_HW_TRY_PROBE:
 DETECT_HW_OK:
 	LD	A, 1
 	LD	(PSG_HW_VALID), A
+	CALL	SANITIZE_AY_PORTS
 	XOR	A
 	RET
 
 DETECT_HW_FALLBACK:
 
 	CALL	SET_CONFIG_MSX
+	CALL	APPLY_Z180_FOR_PLATFORM	; MSX ports on Z180 still need DCNTL slow-I/O
 	XOR	A
 	LD	(PSG_HW_VALID), A
+	RET
+
+; Apply VTUNE.CFG primary card when non-zero. Same IDs as HW_MODE_*.
+; Returns A=0 if applied, A!=0 if auto / unset.
+APPLY_CFG_CARD1:
+	LD	A, (CFG_AY_CARD1)
+	OR	A
+	JR	Z, APPLY_CFG_CARD1_NONE
+	LD	(HW_DETECT_MODE), A	; reuse CLI apply path
+	JP	CHECK_HW_CLI_FLAGS
+APPLY_CFG_CARD1_NONE:
+	LD	A, 1
 	RET
 
 ; Apply CLI port override (-msx, -rc, -coleco, -eb). Returns A=0 if applied, A!=0 if auto.
@@ -3468,8 +4084,28 @@ CHECK_HW_CLI_COLECO:
 CHECK_HW_CLI_EB:
 	CALL	SET_CONFIG_EB_Z180
 CHECK_HW_CLI_DONE:
+	CALL	CAPTURE_PLATFORM_Z180	; -msx/-rc/etc on Z180 still need slow-I/O
+	CALL	SANITIZE_AY_PORTS	; -rc $D8/$D0 collide with Z180 regs @ $C0
 	XOR	A
 	RET
+
+; If HBIOS is present, record platform id and map Z180_IO_BASE (DCNTL slow-I/O).
+; No-op when HBIOS is absent (Z180_IO_BASE stays as set by SET_CONFIG_*).
+CAPTURE_PLATFORM_Z180:
+	LD	HL, ($FFFC)
+	LD	A, 'W'
+	CP	(HL)
+	RET	NZ
+	INC	HL
+	LD	A, ~'W'
+	CP	(HL)
+	RET	NZ
+	LD	B, BF_SYSVER
+	LD	C, 0
+	RST	08			; L := platform id
+	LD	A, L
+	LD	(HBIOS_PLATFORM_ID), A
+	JP	APPLY_Z180_FOR_PLATFORM
 
 ; Detect RomWBW HBIOS and query the primary AY device ports.
 ; Returns A=0 on success, A!=0 on failure.
@@ -3493,7 +4129,7 @@ DETECT_HBIOS_PLATFORM:
 	RST	08
 	LD	A, E
 	OR	A
-	RET	NZ			; No sound devices reported
+	RET	Z			; E=0 → no sound devices
 
 	XOR	A
 	LD	C, A			; Query sound unit 0
@@ -3625,29 +4261,23 @@ PROBE_HW_SET_COLECO:
 	JR	PROBE_SUCCESS
 
 PROBE_SUCCESS:
+	CALL	APPLY_Z180_FOR_PLATFORM	; probe may pick MSX ports on a Z180 board
 	XOR	A
 	RET
 
 ; Undo probe side effects on port pair BC (RSEL, RDAT): mixer off, amps down.
 ; Do not write tone period registers (0 = max pitch).
 ; Input: B=RSEL, C=RDAT.
+; Caller (PROBE_AY_PORTS) already holds PSG_IO_SLOW_ENTER — do not nest
+; enter/exit here (nested save of DCNTL corrupts the restore on Z180).
 PROBE_AY_QUIET:
 	PUSH	AF
 	PUSH	BC
 	PUSH	DE
 	LD	A, B
-	LD	E, A			; E = RSEL (preserve for slow-IO exit)
+	LD	E, A			; E = RSEL
 	LD	A, C
 	LD	D, A			; D = RDAT
-	LD	A, E
-	CP	$68
-	JR	Z, PROBE_AY_QUIET_SLOW
-	CP	$D8
-	JR	Z, PROBE_AY_QUIET_SLOW
-	JR	PROBE_AY_QUIET_IO
-PROBE_AY_QUIET_SLOW:
-	CALL	PSG_IO_SLOW_ENTER
-PROBE_AY_QUIET_IO:
 	LD	B, 0
 	LD	C, E
 	LD	A, 7
@@ -3673,15 +4303,6 @@ PROBE_AY_QUIET_IO:
 	LD	C, D
 	LD	A, $00
 	OUT	(C), A
-	LD	A, E
-	CP	$68
-	JR	Z, PROBE_AY_QUIET_SLOWX
-	CP	$D8
-	JR	Z, PROBE_AY_QUIET_SLOWX
-	JR	PROBE_AY_QUIET_DONE
-PROBE_AY_QUIET_SLOWX:
-	CALL	PSG_IO_SLOW_EXIT
-PROBE_AY_QUIET_DONE:
 	POP	DE
 	POP	BC
 	POP	AF
@@ -3733,8 +4354,9 @@ SET_CONFIG_MSX:
 	LD	(PSG2_DATA_PORT), A
 	LD	A, $A3
 	LD	(PSG2_REG_PORT), A
-	LD	A, $FF
-	LD	(Z180_IO_BASE), A
+	; Do not force Z180_IO_BASE=$FF here: MSX-addressed cards on SCZ180/RCZ180
+	; still need DCNTL slow-I/O. Caller applies APPLY_Z180_FOR_PLATFORM /
+	; CAPTURE_PLATFORM_Z180 once the platform id is known.
 	LD	HL, HW_DESC_MSX
 	LD	(HW_CONFIG_DESC), HL
 	RET
@@ -3779,6 +4401,49 @@ SET_CONFIG_COLECO:
 	LD	HL, HW_DESC_COLECO
 	LD	(HW_CONFIG_DESC), HL
 	RET
+
+; True (A!=0) if port A lies in the Z180 internal I/O window
+; [Z180_IO_BASE, Z180_IO_BASE+3Fh]. A=0 if no Z180 or port is safe.
+; On SC126 IO_BASE=$C0, so $D0/$D8 (-rc) are TCR / internal — not AY.
+AY_PORT_IN_Z180_WIN:
+	LD	B, A
+	LD	A, (Z180_IO_BASE)
+	CP	$FF
+	JR	Z, AY_PORT_Z180_SAFE
+	LD	C, A			; C = base
+	LD	A, B
+	SUB	C
+	JR	C, AY_PORT_Z180_SAFE	; port < base
+	CP	$40
+	JR	NC, AY_PORT_Z180_SAFE	; port >= base+64
+	LD	A, 1
+	RET
+AY_PORT_Z180_SAFE:
+	XOR	A
+	RET
+
+; If current PSG ports collide with Z180 internal regs, explain and abort.
+; Do not remap and continue — $D0/$D8 are not usable for AY on stock SC126.
+; Clobbers AF/BC/DE/HL; does not return on collision.
+SANITIZE_AY_PORTS:
+	LD	A, (PSG_REG_PORT)
+	CALL	AY_PORT_IN_Z180_WIN
+	OR	A
+	JR	NZ, SANITIZE_AY_ABORT
+	LD	A, (PSG_DATA_PORT)
+	CALL	AY_PORT_IN_Z180_WIN
+	OR	A
+	RET	Z
+SANITIZE_AY_ABORT:
+	LD	DE, MSG_AY_Z180_COLLIDE
+	CALL	PRTSTR
+	CALL	CRLF
+	; Park ports outside the Z180 window so exit mute cannot hit TCR/etc.
+	XOR	A
+	LD	(TSFLAG), A
+	LD	(TS_DUALHW), A
+	CALL	SET_CONFIG_MSX
+	JP	START_EXIT
 
 ; Milestone 5: Load tune from FCB_WORK into MUSIC_BUF.
 ; FCB_WORK must already be built (BUILD_FCB_FROM_ARG called in validation).
@@ -4043,11 +4708,6 @@ TO_UPPER:
 	RET
 
 ; Print the zero-terminated string addressed by DE.
-; Print NUL-terminated string at DE followed by CRLF (shared tail).
-PRTLN:
-	CALL	PRTSTR
-	JP	CRLF
-
 PRTSTR:
 	PUSH	AF
 	PUSH	DE
@@ -4098,26 +4758,28 @@ MSG_CFG_NAME:
 ; Field prefixes, padded so values align at column 12 (see also uian.inc).
 MSG_INPUT:
 	.DB	"Input file: ", 0
+MSG_FTYPE_REG:
+	.DB	" [Regular]", 0
+MSG_FTYPE_TS:
+	.DB	" [TurboSound]", 0
 MSG_PFX_HW:
 	.DB	"Hardware:   ", 0
-MSG_CLASS_PTX:
-	.DB	"Classification: PTx (.pt2/.pt3)", 0
-MSG_CLASS_MYM:
-	.DB	"Classification: MYM (.mym)", 0
-MSG_PTX_VARIANT_VORTEX:
-	.DB	"PTX variant: Vortex Tracker family", 0
-MSG_PTX_VARIANT_PROTRACKER:
-	.DB	"PTX variant: ProTracker family", 0
-MSG_AUDIO_MODE_AY:
-	.DB	"Audio mode: AY (single-chip)", 0
-MSG_AUDIO_MODE_TS:
-	.DB	"Audio mode: TurboSound (auto-detected)", 0
-MSG_TS_HW_HDR:
-	.DB	"TurboSound (2x AY-3-8910)", 0
-MSG_TS_CHIP1_PFX:
-	.DB	"  Chip 1: ", 0
-MSG_TS_CHIP2_PFX:
-	.DB	"  Chip 2: ", 0
+MSG_HW_SINGLE:
+	.DB	"Single-Card mode ", 0
+MSG_HW_DUAL:
+	.DB	"Dual-Card mode ", 0
+MSG_HW_SEP:
+	.DB	" / ", 0
+MSG_HW_AVR_TAG:
+	.DB	" - TurboSound 0xFF/0xFE chip select in use", 0
+MSG_AY_Z180_COLLIDE:
+	.DB	"Cannot use these AY ports on this Z180 machine.", 13, 10
+	.DB	"  $D0/$D8 (-rc) overlap the Z180 internal I/O window", 13, 10
+	.DB	"  (RomWBW Z180_IO_BASE, usually $C0 on SC126).", 13, 10
+	.DB	"Reconfigure the sound card, then retry:", 13, 10
+	.DB	"  Rev5:  EB addressing  $60/$68  (vtune -eb)", 13, 10
+	.DB	"  Rev6.1: MSX $A0/$A1 (vtune -msx) or Coleco $50/$51 (-coleco)", 13, 10
+	.DB	"Aborting.", 0
 TSSTR_MSX:
 	.DB	"MSX standard ($A0H/$A1H)", 0
 TSSTR_COLECO:
@@ -4150,18 +4812,10 @@ MSG_SCANNING:
 	.DB	"Scanning directory...", 0
 MSG_TRACKS_FOUND:
 	.DB	"Tracks found: ", 0
-PTX_SIG_VORTEX:
-	.DB	"Vortex Tracker", 0
-PTX_SIG_PROTRACKER:
-	.DB	"ProTracker ", 0
-PTX_SIG_PT3X:
-	.DB	"PT3!", 0
-PTX_SIG_02TS:
-	.DB	"02TS", 0
 MSG_USAGE:
 	.DB	"Usage: VTUNE [switches] file[.pt3|.pt2|.mym]", 0
 MSG_USAGE_SWITCHES:
-	.DB	"Valid switches: -help -credits -list -loop -delay -msx -rc -coleco -eb", 0
+	.DB	"Valid switches: -help -credits -list -loop -delay -msx -rc -coleco -eb -tsm", 0
 MSG_CREDITS:
 	.DB	"Copyright (C) 2026, Joao Miguel Duraes (fackie)", 13, 10, 13, 10
 	.DB	"Derivative work from/by:", 13, 10
@@ -4178,10 +4832,10 @@ MSG_HELP_TEXT:
 	.DB	"  -msx      Force MSX standard PSG ports ($A0/$A1)", 13, 10
 	.DB	"  -rc       Force RC2014 standard PSG ports ($D8/$D0)", 13, 10
 	.DB	"  -coleco   Force Coleco PSG ports ($50/$51)", 13, 10
-	.DB	"  -eb       Force Ed Brindley (EB) sound module ports", 13, 10
-	.DB	"  -tsm      TurboSound via single-card dual-AVR module (0xFF/0xFE select)", 13, 10, 13, 10
-	.DB	"Playlist keys: Esc=quit, Space=pause, N/P=track, WASD/arrows=nav,", 13, 10
-	.DB	"  l/L=loop track/playlist, R=redraw, DEL x3=delete selected file", 0
+	.DB	"  -eb       Force Ed Brindley (EB) sound module ports ($68/$60)", 13, 10
+	.DB	"  -tsm      Force TurboSound dual-AVR module mode (0xFF/0xFE); auto if Hi-Z", 13, 10, 13, 10
+	.DB	"Playlist keys: Esc=quit, Space=pause, Enter=play (when paused), N/P=track,", 13, 10
+	.DB	"  WASD/arrows=nav, Delx3=delete, R=redraw, l/L=loop track/playlist", 0
 MSG_SWITCH_LIST:
 	.DB	"-list", 0
 MSG_SWITCH_MSX:
@@ -4216,6 +4870,10 @@ MSG_ERR_INVALID_DATA:
 	.DB	"Error: invalid tune structure for selected format.", 0
 MSG_ERR_ENGINE_INIT:
 	.DB	"Error: engine initialization failed.", 0
+MSG_ERR_UNKNOWN_SWITCH_PFX:
+	.DB	"Error: unknown switch [", 0
+MSG_ERR_UNKNOWN_SWITCH_SFX:
+	.DB	"].", 0
 MSG_EXITING:
 	.DB	"Done...", 0
 HW_DESC_UNKNOWN:
@@ -4223,17 +4881,17 @@ HW_DESC_UNKNOWN:
 HW_DESC_HBIOS:
 	.DB	"HBIOS-reported AY ports", 0
 HW_DESC_MSX:
-	.DB	"MSX standard ($A0/$A1)", 0
+	.DB	"MSX standard ($A0H/$A1H)", 0
 HW_DESC_EB_RC:
-	.DB	"RC2014 EB module ($D8/$D0)", 0
+	.DB	"RC2014 EB module ($D8H/$D0H)", 0
 HW_DESC_EB_Z180:
-	.DB	"RCZ180 EB module ($68/$60)", 0
+	.DB	"RCZ180 EB module ($68H/$60H)", 0
 MSG_TIMING_DLY:
 	.DB	"Timing: delay mode", 0
 MSG_TIMING_TIM:
 	.DB	"Timing: timer mode", 0
 HW_DESC_COLECO:
-	.DB	"Coleco ports ($50/$51)", 0
+	.DB	"Coleco ports ($50H/$51H)", 0
 
 ;===============================================================================
 ; Initialized data (EMITTED into the .COM image; no .DS here).
@@ -4257,6 +4915,10 @@ CFG_ROWS:
 	.DB	24			; VTUNE.CFG byte 3 (0 -> 24)
 CFG_COLS:
 	.DB	80			; VTUNE.CFG byte 4 (0 -> 80)
+CFG_AY_CARD1:
+	.DB	0			; VTUNE.CFG byte 6 (0=auto, HW_MODE_* if set)
+CFG_AY_CARD2:
+	.DB	0			; VTUNE.CFG byte 7 (dual-card second AY)
 UI_ACTIVE:
 	.DB	0			; $FF when ANSI playlist UI is in use
 UI_INIT:
@@ -4339,8 +5001,14 @@ TSFLAG:
 	.DB	0
 TS_DUALHW:
 	.DB	0
+TSSET1:
+	.DB	0			; SETUP snapshot after chip-1 quark (bit7=order done)
+TSSET2:
+	.DB	0			; SETUP snapshot after chip-2 quark
 TS_TOPOLOGY:
 	.DB	TS_TOPO_AUTO	; VTUNE.CFG byte 5 / -tsm switch (0=auto, 1=dual-card, 2=module)
+TSMOD_CURSEL:
+	.DB	0			; 0=none, $FF/$FE = pending module select for ROUT
 TS_OFF2:
 	.DW	0
 TS_LEN2:
@@ -4432,6 +5100,12 @@ METATITLE:
 	.DS	32
 METAARTIST:
 	.DS	32
+; Pristine Bulba template (pre-VARS): survives HEAP_CLEAR. Filled once by
+; TS_CAPTURE_PRISTINE at startup; TS_INIT reloads it before each chip INIT.
+TS_CTXTMPL_VARS:
+	.DS	PTX_CTXSIZ
+TS_CTXTMPL_PATCH:
+	.DS	PTX_PATCHSZ
 VARS:
 ChanA	.DS	29
 ChanB	.DS	29
@@ -4457,19 +5131,15 @@ T_NEW_2		.EQU	T_NEW_0 + 24
 T_NEW_3		.EQU	T_OLD_3
 PT2EMPTYORN	.EQU	VT_ + 31
 VAR0END		.EQU	VT_ + 16
-PTX_CTXSIZ	.EQU	VAR0END - VARS
+; PTX_CTXSIZ is #DEFINE'd above (109); must equal VAR0END-VARS.
 EnvBase		.EQU	VT_ + 14
 Ampl		.EQU	AYREGS + AmplC
 Ns_Base_AddToNs	.EQU	Ns_Base
 
-TS_CTXTMPL_VARS:
-	.DS	PTX_CTXSIZ
 TS_CTX1_VARS:
 	.DS	PTX_CTXSIZ
 TS_CTX2_VARS:
 	.DS	PTX_CTXSIZ
-TS_CTXTMPL_PATCH:
-	.DS	PTX_PATCHSZ
 TS_CTX1_PATCH:
 	.DS	PTX_PATCHSZ
 TS_CTX2_PATCH:

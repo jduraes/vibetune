@@ -9,23 +9,22 @@
 ; Screen layout (1-based rows):
 ;   1  banner (cyan)
 ;   2  key help (yellow)
-;   4  input file
-;   5  hardware line
-;   6  song name (PT3 $1E, 32 chars)
-;   7  artist    (PT3 $42, 32 chars)
-;   8  status (Playing/Paused)
-;  10+ playlist tiles (16 chars each, UI_PLCOLS = CFG_COLS/16 per row)
-;  below list + 1: "Looping Status: Off/Track/Playlist"
+;   4  input file + [Regular]/[TurboSound]
+;   5  song name (PT3 $1E, 32 chars)
+;   6  artist    (PT3 $42, 32 chars)
+;   7  hardware (one line; mode encoded in the text)
+;   9+ playlist tiles (16 chars each, UI_PLCOLS = CFG_COLS/16 per row)
+;  after list + blank: State: Playing/Paused
+;  next row: Looping Status: Off/Track/Playlist
 ;===============================================================================
 
 #DEFINE UI_ROW_BANNER 1
 #DEFINE UI_ROW_MODE   2
 #DEFINE UI_ROW_INFO   4
-#DEFINE UI_ROW_INFO2  5
-#DEFINE UI_ROW_META1  6
-#DEFINE UI_ROW_META2  7
-#DEFINE UI_ROW_PLAY   8
-#DEFINE UI_ROW_PLLIST 10
+#DEFINE UI_ROW_META1  5
+#DEFINE UI_ROW_META2  6
+#DEFINE UI_ROW_INFO2  7
+#DEFINE UI_ROW_PLLIST 9
 
 #DEFINE UI_TILE_W     16	; marker(1) + name(12) + gap(3)
 
@@ -172,10 +171,10 @@ UI_SHOWPL_MARKED:
 UI_SHOWPL_NEXT:
 	DEC	B
 	JP	NZ, UI_SHOWPL_LOOP
-	JP	UI_SHOW_LOOP_STATUS
+	JP	UI_SHOW_FOOTER
 UI_SHOWPL_DONE:
 	POP	BC
-	JP	UI_SHOW_LOOP_STATUS
+	JP	UI_SHOW_FOOTER
 
 ;-------------------------------------------------------------------------------
 ; HL = TRACK_LIST + A * TRACK_NAME_LEN
@@ -304,35 +303,85 @@ UI_UPDATE_MARKER_DELTA:
 	LD	(UI_MARK), A
 	LD	A, (TRACK_SELECTED)
 	CALL	UI_DRAW_PL_ENTRY
+	JP	UI_CURSOR_ON_SELECTED
+
+;-------------------------------------------------------------------------------
+; Park the flashing VT cursor on the '>' of TRACK_SELECTED (tile origin).
+; After printing a tile the cursor sits in the 3-space gap / next column;
+; call this so the blink overlays the selection marker instead.
+;-------------------------------------------------------------------------------
+
+UI_CURSOR_ON_SELECTED:
+	LD	A, (UI_ACTIVE)
+	OR	A
+	RET	Z
+	LD	A, (TRACK_COUNT)
+	OR	A
+	RET	Z
+	PUSH	BC
+	PUSH	DE
+	PUSH	HL
+	CALL	UI_CALC_COLS
+	LD	A, (TRACK_SELECTED)
+	LD	E, A			; column index within row
+	XOR	A
+	LD	D, A			; row offset from UI_ROW_PLLIST
+	LD	A, (UI_PLCOLS)
+	LD	L, A
+UI_CUR_MARK1:
+	LD	A, E
+	CP	L
+	JR	C, UI_CUR_MARK2
+	SUB	L
+	LD	E, A
+	INC	D
+	JR	UI_CUR_MARK1
+UI_CUR_MARK2:
+	LD	A, UI_ROW_PLLIST
+	ADD	A, D
+	LD	B, A
+	LD	A, (CFG_ROWS)
+	CP	B
+	JR	C, UI_CUR_MARKX		; off-screen
+	LD	A, E
+	ADD	A, A
+	ADD	A, A
+	ADD	A, A
+	ADD	A, A			; * UI_TILE_W (16)
+	INC	A			; 1-based column of '>'
+	LD	C, A
+	CALL	TCFG_ANSI_AT
+UI_CUR_MARKX:
+	POP	HL
+	POP	DE
+	POP	BC
 	RET
 
 ;-------------------------------------------------------------------------------
-; "Looping Status: Off/Track/Playlist" one row below the last tile row
+; Footer after playlist: State row, then Looping Status (park cursor on '>')
 ;-------------------------------------------------------------------------------
 
+UI_SHOW_FOOTER:
+	LD	A, (PLAY_STATE)
+	CP	PLAY_PAUSED
+	JR	Z, UI_SHOW_FOOTER_P
+	CALL	UI_DRAW_STATE_PLAYING
+	JR	UI_SHOW_LOOP_STATUS
+UI_SHOW_FOOTER_P:
+	CALL	UI_DRAW_STATE_PAUSED
+	; fall through
+
+; "Looping Status: Off/Track/Playlist" on the row below State
 UI_SHOW_LOOP_STATUS:
 	LD	A, (UI_ACTIVE)
 	OR	A
 	RET	Z
-	CALL	UI_CALC_COLS
-	LD	A, (UI_PLCOLS)
-	LD	D, A
-	LD	A, (TRACK_COUNT)
-	LD	E, 0
-UI_LOOPSTAT0:
-	OR	A
-	JR	Z, UI_LOOPSTAT1
-	INC	E
-	SUB	D
-	JR	NC, UI_LOOPSTAT0
-UI_LOOPSTAT1:
-	LD	A, UI_ROW_PLLIST
-	ADD	A, E			; row below playlist
-	INC	A			; leave one blank line
-	LD	B, A
+	CALL	UI_FOOTER_STATE_ROW
+	RET	C			; no room for State — skip loop too
+	INC	B			; loop row = state + 1
 	LD	A, (CFG_ROWS)
 	CP	B
-	RET	C			; no room for the status line
+	RET	C
 	PUSH	BC
 	CALL	UI_CLR_ROW
 	POP	BC
@@ -354,10 +403,32 @@ UI_LOOPSTAT_PL:
 	LD	DE, MSG_LOOPSTAT_PL
 UI_LOOPSTAT_PRT:
 	CALL	PRTSTR
-	RET
+	JP	UI_CURSOR_ON_SELECTED
+
+; OUT: B = State row; CY set if off-screen. Playlist rows + blank + 1.
+UI_FOOTER_STATE_ROW:
+	CALL	UI_CALC_COLS
+	LD	A, (UI_PLCOLS)
+	LD	D, A
+	LD	A, (TRACK_COUNT)
+	LD	E, 0
+UI_FOOTER_ROWS:
+	OR	A
+	JR	Z, UI_FOOTER_ROWS1
+	INC	E
+	SUB	D
+	JR	NC, UI_FOOTER_ROWS
+UI_FOOTER_ROWS1:
+	LD	A, UI_ROW_PLLIST
+	ADD	A, E
+	INC	A			; blank line after playlist
+	LD	B, A
+	LD	A, (CFG_ROWS)
+	CP	B
+	RET				; CY if CFG_ROWS < B
 
 ;-------------------------------------------------------------------------------
-; Status row (UI_ROW_PLAY): Playing (green) / Paused (yellow)
+; State: Playing (green) / Paused (yellow) — dynamic footer row
 ;-------------------------------------------------------------------------------
 
 UI_STATUS_PLAYING:
@@ -365,35 +436,45 @@ UI_STATUS_PLAYING:
 	OR	A
 	RET	Z
 	CALL	UI_ENSURE_INIT
-	LD	B, UI_ROW_PLAY
-	CALL	UI_CLR_ROW
-	LD	B, UI_ROW_PLAY
-	LD	C, 1
-	CALL	TCFG_ANSI_AT
-	CALL	TCFG_COL_OK
-	LD	DE, MSG_STATE_PLAYING
-	CALL	PRTSTR
-	CALL	TCFG_COL_RST
-	RET
+	CALL	UI_DRAW_STATE_PLAYING
+	JP	UI_CURSOR_ON_SELECTED
 
 UI_STATUS_PAUSED:
 	LD	A, (UI_ACTIVE)
 	OR	A
 	RET	Z
 	CALL	UI_ENSURE_INIT
-	LD	B, UI_ROW_PLAY
+	CALL	UI_DRAW_STATE_PAUSED
+	JP	UI_CURSOR_ON_SELECTED
+
+UI_DRAW_STATE_PLAYING:
+	CALL	UI_FOOTER_STATE_ROW
+	RET	C
+	PUSH	BC
 	CALL	UI_CLR_ROW
-	LD	B, UI_ROW_PLAY
+	POP	BC
+	LD	C, 1
+	CALL	TCFG_ANSI_AT
+	CALL	TCFG_COL_OK
+	LD	DE, MSG_STATE_PLAYING
+	CALL	PRTSTR
+	JP	TCFG_COL_RST
+
+UI_DRAW_STATE_PAUSED:
+	CALL	UI_FOOTER_STATE_ROW
+	RET	C
+	PUSH	BC
+	CALL	UI_CLR_ROW
+	POP	BC
 	LD	C, 1
 	CALL	TCFG_ANSI_AT
 	CALL	TCFG_COL_PRM
 	LD	DE, MSG_STATE_PAUSED
 	CALL	PRTSTR
-	CALL	TCFG_COL_RST
-	RET
+	JP	TCFG_COL_RST
 
 ;-------------------------------------------------------------------------------
-; Track status block (rows 4-8): input file, hardware, metadata, status
+; Track status block (rows 4-7): input+type, metadata, hardware
 ;-------------------------------------------------------------------------------
 
 UI_TRACK_STATUS_BLOCK:
@@ -405,7 +486,7 @@ UI_TRACK_STATUS_BLOCK:
 UI_TSB_CLEAR:
 	CALL	UI_CLR_ROW
 	LD	A, B
-	CP	UI_ROW_PLAY
+	CP	UI_ROW_INFO2
 	JR	Z, UI_TSB_INFO
 	INC	B
 	JR	UI_TSB_CLEAR
@@ -413,16 +494,13 @@ UI_TSB_INFO:
 	LD	B, UI_ROW_INFO
 	LD	C, 1
 	CALL	TCFG_ANSI_AT
-	LD	DE, MSG_INPUT
-	CALL	PRTSTR
-	LD	DE, ARG_BUFFER
-	CALL	PRTSTR
+	CALL	PRINT_INPUT_FILE_LINE
+	CALL	UI_PRINT_META
 	LD	B, UI_ROW_INFO2
 	LD	C, 1
 	CALL	TCFG_ANSI_AT
-	CALL	PRINT_HARDWARE_CONFIG
-	CALL	UI_PRINT_META
-	; Draw the status row for the actual state (avoids a Playing flash
+	CALL	PRINT_PLAYBACK_HW_LINE
+	; Footer state for the actual play/pause (avoids a Playing flash
 	; when reloading into a paused state).
 	LD	A, (PLAY_STATE)
 	CP	PLAY_PAUSED
@@ -487,7 +565,7 @@ META_COPY322:
 	DJNZ	META_COPY321
 	RET
 
-; Print metadata at rows 6/7 (UI mode).
+; Print metadata at rows 5/6 (UI mode).
 UI_PRINT_META:
 	LD	A, (UI_ACTIVE)
 	OR	A
@@ -567,8 +645,9 @@ UI_EXIT_PROMPT3:
 	LD	A, UI_ROW_PLLIST
 	ADD	A, B			; last playlist row
 	INC	A			; blank line
-	INC	A			; looping status line
-	INC	A			; blank line
+	INC	A			; State line
+	INC	A			; Looping Status line
+	INC	A			; blank before CP/M prompt
 UI_EXIT_PROMPT4:
 	LD	D, A
 	LD	A, (CFG_ROWS)
@@ -754,7 +833,31 @@ UI_PRTDECB_DIG3:
 ; PLAYLIST_MOVE_WASD: there is no separate cursor — the '>' marker IS the
 ; current track, and an accepted move switches tracks (like N/P).
 ; Each UI_NAV_* returns A = new TRACK_SELECTED index.
+;
+; Plain-text -list (UI_ACTIVE=0) prints one track per line, so arrows/WASD
+; move linearly (±1 with wrap). ANSI mode keeps the tile-grid matrix.
 ;-------------------------------------------------------------------------------
+
+; Linear prev/next for the vertical plain list. Returns A = new index.
+UI_NAV_LINEAR_PREV:
+	LD	A, (TRACK_SELECTED)
+	OR	A
+	JR	NZ, UI_NAV_LIN_PREV_DEC
+	LD	A, (TRACK_COUNT)
+	DEC	A
+	RET
+UI_NAV_LIN_PREV_DEC:
+	DEC	A
+	RET
+
+UI_NAV_LINEAR_NEXT:
+	LD	A, (TRACK_SELECTED)
+	INC	A
+	LD	HL, TRACK_COUNT
+	CP	(HL)
+	RET	C
+	XOR	A
+	RET
 
 ; Total playlist rows = ceil(TRACK_COUNT / UI_PLCOLS). Returns A.
 UI_PL_ROWS:
@@ -796,6 +899,9 @@ UI_PL_COL_OF2:
 
 ; Up one row; wraps top -> bottom (column clamped on a short last row).
 UI_NAV_UP:
+	LD	A, (UI_ACTIVE)
+	OR	A
+	JP	Z, UI_NAV_LINEAR_PREV
 	CALL	UI_CALC_COLS
 	LD	A, (TRACK_SELECTED)
 	LD	B, A
@@ -823,6 +929,9 @@ UI_NAV_UP_RET:
 
 ; Down one row; wraps bottom -> same column in the top row.
 UI_NAV_DOWN:
+	LD	A, (UI_ACTIVE)
+	OR	A
+	JP	Z, UI_NAV_LINEAR_NEXT
 	CALL	UI_CALC_COLS
 	LD	A, (TRACK_SELECTED)
 	LD	B, A
@@ -838,6 +947,9 @@ UI_NAV_DOWN_RET:
 
 ; Left one column; wraps to the last entry of the current row.
 UI_NAV_LEFT:
+	LD	A, (UI_ACTIVE)
+	OR	A
+	JP	Z, UI_NAV_LINEAR_PREV
 	LD	A, (TRACK_SELECTED)
 	CALL	UI_PL_COL_OF
 	OR	A
@@ -861,6 +973,9 @@ UI_NAV_LEFT_DEC:
 
 ; Right one column; wraps to the first entry of the current row.
 UI_NAV_RIGHT:
+	LD	A, (UI_ACTIVE)
+	OR	A
+	JP	Z, UI_NAV_LINEAR_NEXT
 	LD	A, (TRACK_SELECTED)
 	CALL	UI_PL_COL_OF
 	LD	B, A			; B = col
@@ -880,8 +995,8 @@ UI_NAV_RIGHT_WRAP:
 	RET
 
 ; Called after Esc in UI mode: give an escape sequence a short window to
-; arrive (arrow keys = ESC [ A/B/C/D or ESC O A/B/C/D).
-; Returns A=0 for a bare Esc (quit), A=1 when a sequence was consumed.
+; arrive (arrow keys = ESC [ A/B/C/D or ESC O A/B/C/D; keypad Enter = ESC O M).
+; Returns A=0 bare Esc (quit), A=1 sequence consumed, A=2 delete, A=3 Enter.
 ; On an arrow key, UI_IDXTMP holds the new index (<> $FF).
 UI_ESC_SEQ:
 	LD	A, $FF
@@ -901,25 +1016,26 @@ UI_ESC_SEQ1:
 UI_ESC_SEQ2:
 	AND	$7F
 	CP	'['
-	JR	Z, UI_ESC_SEQ3
+	JR	Z, UI_ESC_SEQ_CSI
 	CP	'O'
-	JR	Z, UI_ESC_SEQ3
+	JR	Z, UI_ESC_SEQ_SS3
 	LD	A, 1			; unknown sequence — swallow
 	RET
-UI_ESC_SEQ3:
-	LD	B, $40			; wait for the final byte
-UI_ESC_SEQ4:
+
+UI_ESC_SEQ_CSI:
+	LD	B, $40
+UI_ESC_CSI1:
 	PUSH	BC
 	LD	C, $06
 	LD	E, $FF
 	CALL	BDOS
 	POP	BC
 	OR	A
-	JR	NZ, UI_ESC_SEQ5
-	DJNZ	UI_ESC_SEQ4
-	LD	A, 1			; incomplete sequence — swallow
+	JR	NZ, UI_ESC_CSI2
+	DJNZ	UI_ESC_CSI1
+	LD	A, 1			; incomplete — swallow
 	RET
-UI_ESC_SEQ5:
+UI_ESC_CSI2:
 	AND	$7F
 	CP	'3'
 	JR	Z, UI_ESC_DEL_TILDE
@@ -931,7 +1047,39 @@ UI_ESC_SEQ5:
 	JR	Z, UI_ESC_RIGHT
 	CP	'D'
 	JR	Z, UI_ESC_LEFT
-	LD	A, 1			; unknown final byte — swallow
+	LD	A, 1
+	RET
+
+UI_ESC_SEQ_SS3:
+	LD	B, $40
+UI_ESC_SS31:
+	PUSH	BC
+	LD	C, $06
+	LD	E, $FF
+	CALL	BDOS
+	POP	BC
+	OR	A
+	JR	NZ, UI_ESC_SS32
+	DJNZ	UI_ESC_SS31
+	LD	A, 1
+	RET
+UI_ESC_SS32:
+	AND	$7F
+	CP	'M'
+	JR	Z, UI_ESC_ENTER		; keypad Enter
+	CP	'A'
+	JR	Z, UI_ESC_UP
+	CP	'B'
+	JR	Z, UI_ESC_DOWN
+	CP	'C'
+	JR	Z, UI_ESC_RIGHT
+	CP	'D'
+	JR	Z, UI_ESC_LEFT
+	LD	A, 1
+	RET
+
+UI_ESC_ENTER:
+	LD	A, 3
 	RET
 UI_ESC_DEL_TILDE:
 	; ESC [ 3 ~ = DEL key: consume the trailing '~', report A=2
@@ -971,7 +1119,7 @@ UI_ESC_NAV_DONE:
 ;-------------------------------------------------------------------------------
 
 MSG_PLKEYS:
-	.DB	"Keys: Esc=quit, Space=pause, N/P=track, WASD=nav, (R)edraw, (l/L)oop trk/plist", 0
+	.DB	"Keys: Esc=quit, Space=pause, Enter=play, N/P=track, WASD=nav, (R)edraw, (l/L)oop trk/plist", 0
 MSG_LOOPSTAT:
 	.DB	"Looping Status: ", 0
 MSG_LOOPSTAT_OFF:

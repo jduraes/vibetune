@@ -5,16 +5,17 @@
 ; Derived from the terminal-configuration mode of RomWBW's tune.asm by
 ; Wayne Warthen (GNU GPL v3).
 ;
-; Writes VTUNE.CFG (128-byte record, first 6 bytes used):
+; Writes VTUNE.CFG (128-byte record, first 8 bytes used):
 ;   byte 0: magic = $A5
 ;   byte 1: term type (0=plain, 1=VTxxx, 2=ANSI)  -- vtune.com DISP_MODE
 ;   byte 2: flags (bit 0 = ANSI colour)
 ;   byte 3: rows (0 -> default 24)
 ;   byte 4: cols (0 -> default 80)
 ;   byte 5: TS topology (0=auto, 1=dual-card, 2=single-card dual-AVR module)
+;   byte 6: primary AY card (0=auto, 1=MSX, 2=RC, 3=EB, 4=Coleco)
+;   byte 7: second AY card for dual-card (0=none, 1..4 as above)
 ;
-; vtune.com reads only bytes 0-1; bytes 2-4 are forward-compatible extensions
-; (same semantics as the old TERM.CFG layout used by the -config mode).
+; vtune.com: CFG is the default; CLI (-msx/-rc/-eb/-coleco/-tsm) overrides.
 ;
 ; Usage: VTUNECFG                interactive configuration (old -config UI)
 ;        VTUNECFG plain|vt100|ansi|0|1|2   one-shot term type change
@@ -44,6 +45,13 @@
 #DEFINE TS_TOPO_AUTO     0
 #DEFINE TS_TOPO_DUALCARD 1
 #DEFINE TS_TOPO_MODULE   2
+
+; Match vibetune.asm HW_MODE_* (byte 6/7 of VTUNE.CFG)
+#DEFINE AY_CARD_AUTO   0
+#DEFINE AY_CARD_MSX    1
+#DEFINE AY_CARD_RC     2
+#DEFINE AY_CARD_EB     3
+#DEFINE AY_CARD_COLECO 4
 
 #DEFINE TCFG_ORG_ROW 5
 #DEFINE TCFG_ORG_COL 5
@@ -133,7 +141,7 @@ START_VERIFY:
 
 	LD	HL, CFG_TERM
 	LD	DE, BEFORE_TERM
-	LD	BC, 5
+	LD	BC, 7
 	LDIR
 
 	CALL	CFG_SAVE
@@ -146,7 +154,7 @@ START_VERIFY:
 
 	LD	HL, CFG_TERM
 	LD	DE, BEFORE_TERM
-	LD	B, 5
+	LD	B, 7
 START_VERIFY_CMP:
 	LD	A, (DE)
 	CP	(HL)
@@ -199,9 +207,13 @@ START_INT_STATUS:
 	CALL	TCFG_PRINT_SUMMARY
 	CALL	CRLF2
 
+	CALL	TCFG_ASK_CARD1
+	CALL	TCFG_ASK_TS
+	LD	A, (CFG_TSTOPO)
+	CP	TS_TOPO_DUALCARD
+	CALL	Z, TCFG_ASK_CARD2
 	CALL	TCFG_ASK_TERM
 	CALL	TCFG_ASK_ANSI
-	CALL	TCFG_ASK_TS
 
 	LD	A, (CFG_TERM)
 	OR	A
@@ -248,13 +260,15 @@ CFG_DEFAULTS:
 	LD	(CFG_TERM), A
 	LD	(CFG_FLAGS), A
 	LD	(CFG_TSTOPO), A
+	LD	(CFG_CARD1), A
+	LD	(CFG_CARD2), A
 	LD	A, CFG_DFL_ROWS
 	LD	(CFG_ROWS), A
 	LD	A, CFG_DFL_COLS
 	LD	(CFG_COLS), A
 	RET
 
-; Load VTUNE.CFG into CFG_TERM/FLAGS/ROWS/COLS (defaults preloaded).
+; Load VTUNE.CFG into CFG_* (defaults preloaded).
 ; Returns A=CFGSTAT_OK, CFGSTAT_MISSING, CFGSTAT_INVALID.
 CFG_LOAD:
 	CALL	CFG_DEFAULTS
@@ -268,7 +282,9 @@ CFG_LOAD:
 	CP	$FF
 	JR	Z, CFG_LOAD_MISSING
 	XOR	A
-	LD	(DMA_BUFFER+5), A	; short/old file -> byte 5 = 0 (TS auto)
+	LD	(DMA_BUFFER+5), A	; short/old file -> TS auto, cards auto/none
+	LD	(DMA_BUFFER+6), A
+	LD	(DMA_BUFFER+7), A
 	LD	DE, CFG_FCB
 	LD	C, $14
 	CALL	BDOS
@@ -299,12 +315,24 @@ CFG_LOAD_ROWS_OK:
 	LD	A, CFG_DFL_COLS
 CFG_LOAD_COLS_OK:
 	LD	(CFG_COLS), A
-	LD	A, (DMA_BUFFER+5)	; old files: record was zero-filled -> 0 (auto)
+	LD	A, (DMA_BUFFER+5)
 	CP	3
 	JR	C, CFG_LOAD_TS_OK
 	XOR	A
 CFG_LOAD_TS_OK:
 	LD	(CFG_TSTOPO), A
+	LD	A, (DMA_BUFFER+6)
+	CP	5
+	JR	C, CFG_LOAD_C1_OK
+	XOR	A
+CFG_LOAD_C1_OK:
+	LD	(CFG_CARD1), A
+	LD	A, (DMA_BUFFER+7)
+	CP	5
+	JR	C, CFG_LOAD_C2_OK
+	XOR	A
+CFG_LOAD_C2_OK:
+	LD	(CFG_CARD2), A
 
 	LD	DE, CFG_FCB
 	LD	C, $10
@@ -323,11 +351,11 @@ CFG_LOAD_MISSING:
 	LD	A, CFGSTAT_MISSING
 	RET
 
-; Write CFG_TERM/FLAGS/ROWS/COLS to VTUNE.CFG. Returns A=0 ok, A=1 fail.
+; Write CFG_* to VTUNE.CFG. Returns A=0 ok, A=1 fail.
 CFG_SAVE:
 	CALL	BUILD_CFG_FCB
 
-	; Prepare one DMA record (128 bytes), first 5 bytes used.
+	; Prepare one DMA record (128 bytes), first 8 bytes used.
 	LD	HL, DMA_BUFFER
 	LD	B, 128
 CFG_SAVE_CLR:
@@ -348,6 +376,10 @@ CFG_SAVE_CLR:
 	LD	(DMA_BUFFER+4), A
 	LD	A, (CFG_TSTOPO)
 	LD	(DMA_BUFFER+5), A
+	LD	A, (CFG_CARD1)
+	LD	(DMA_BUFFER+6), A
+	LD	A, (CFG_CARD2)
+	LD	(DMA_BUFFER+7), A
 
 	LD	DE, DMA_BUFFER
 	LD	C, $1A
@@ -412,6 +444,25 @@ BUILD_CFG_NAME:
 ;===============================================================================
 
 TCFG_PRINT_SUMMARY:
+	LD	DE, MSG_CFGCARD1
+	CALL	PRTSTR
+	LD	A, (CFG_CARD1)
+	CALL	PRINT_CARD_NAME
+	CALL	CRLF
+	LD	DE, MSG_CFGTS
+	CALL	PRTSTR
+	LD	A, (CFG_TSTOPO)
+	CALL	PRINT_TS_NAME
+	CALL	CRLF
+	LD	A, (CFG_TSTOPO)
+	CP	TS_TOPO_DUALCARD
+	JR	NZ, TCFG_SUMMARY_TERM
+	LD	DE, MSG_CFGCARD2
+	CALL	PRTSTR
+	LD	A, (CFG_CARD2)
+	CALL	PRINT_CARD_NAME
+	CALL	CRLF
+TCFG_SUMMARY_TERM:
 	LD	DE, MSG_CFGTERM
 	CALL	PRTSTR
 	LD	A, (CFG_TERM)
@@ -439,11 +490,6 @@ TCFG_SUMMARY0:
 	CALL	PRTCHR
 	LD	A, (CFG_ROWS)
 	CALL	PRTDECB
-	CALL	CRLF
-	LD	DE, MSG_CFGTS
-	CALL	PRTSTR
-	LD	A, (CFG_TSTOPO)
-	CALL	PRINT_TS_NAME
 	RET
 
 PRINT_TERM_NAME:
@@ -547,8 +593,165 @@ TCFG_ASK_ANSI_NO:
 	RET
 
 ;-------------------------------------------------------------------------------
-; TurboSound hardware topology: 0=auto (probe dual-card), 1=dual-card,
-; 2=single-card dual-AVR module (0xFF/0xFE chip select on one port pair)
+; Primary AY card (first interactive question)
+;-------------------------------------------------------------------------------
+TCFG_ASK_CARD1:
+TCFG_ASK_CARD1_0:
+	CALL	TCFG_COL_PRM
+	LD	DE, MSG_CARD1MENU
+	CALL	PRTSTR
+	CALL	CRLF
+	LD	DE, MSG_CARDPROMPT
+	CALL	PRTSTR
+	LD	A, (CFG_CARD1)
+	CALL	PRINT_CARD_NAME
+	LD	DE, MSG_PROMPTEND
+	CALL	PRTSTR
+	CALL	TCFG_COL_RST
+	CALL	TCFG_GETCH
+	CP	13
+	JR	Z, TCFG_ASK_CARD1_KEEP
+	PUSH	AF
+	CALL	PRTCHR
+	CALL	CRLF
+	POP	AF
+	CALL	TO_UPPER
+	CP	'A'
+	JR	Z, TCFG_ASK_C1_AUTO
+	CP	'M'
+	JR	Z, TCFG_ASK_C1_MSX
+	CP	'R'
+	JR	Z, TCFG_ASK_C1_RC
+	CP	'E'
+	JR	Z, TCFG_ASK_C1_EB
+	CP	'C'
+	JR	Z, TCFG_ASK_C1_COLECO
+	JR	TCFG_ASK_CARD1_0
+TCFG_ASK_CARD1_KEEP:
+	CALL	CRLF
+	RET
+TCFG_ASK_C1_AUTO:
+	XOR	A
+	LD	(CFG_CARD1), A
+	RET
+TCFG_ASK_C1_MSX:
+	LD	A, AY_CARD_MSX
+	LD	(CFG_CARD1), A
+	RET
+TCFG_ASK_C1_RC:
+	LD	A, AY_CARD_RC
+	LD	(CFG_CARD1), A
+	RET
+TCFG_ASK_C1_EB:
+	LD	A, AY_CARD_EB
+	LD	(CFG_CARD1), A
+	RET
+TCFG_ASK_C1_COLECO:
+	LD	A, AY_CARD_COLECO
+	LD	(CFG_CARD1), A
+	RET
+
+;-------------------------------------------------------------------------------
+; Second AY card (dual-card topology only). Must be a concrete port set.
+;-------------------------------------------------------------------------------
+TCFG_ASK_CARD2:
+TCFG_ASK_CARD2_0:
+	CALL	TCFG_COL_PRM
+	LD	DE, MSG_CARD2MENU
+	CALL	PRTSTR
+	CALL	CRLF
+	LD	DE, MSG_CARDPROMPT
+	CALL	PRTSTR
+	LD	A, (CFG_CARD2)
+	OR	A
+	JR	NZ, TCFG_ASK_CARD2_CUR
+	LD	DE, MSG_CARD_NONE
+	CALL	PRTSTR
+	JR	TCFG_ASK_CARD2_PR
+TCFG_ASK_CARD2_CUR:
+	CALL	PRINT_CARD_NAME
+TCFG_ASK_CARD2_PR:
+	LD	DE, MSG_PROMPTEND
+	CALL	PRTSTR
+	CALL	TCFG_COL_RST
+	CALL	TCFG_GETCH
+	CP	13
+	JR	Z, TCFG_ASK_CARD2_KEEP
+	PUSH	AF
+	CALL	PRTCHR
+	CALL	CRLF
+	POP	AF
+	CALL	TO_UPPER
+	CP	'M'
+	JR	Z, TCFG_ASK_C2_MSX
+	CP	'R'
+	JR	Z, TCFG_ASK_C2_RC
+	CP	'E'
+	JR	Z, TCFG_ASK_C2_EB
+	CP	'C'
+	JR	Z, TCFG_ASK_C2_COLECO
+	JR	TCFG_ASK_CARD2_0
+TCFG_ASK_CARD2_KEEP:
+	CALL	CRLF
+	LD	A, (CFG_CARD2)
+	OR	A
+	JR	Z, TCFG_ASK_CARD2_0	; must pick a second card
+	LD	B, A
+	LD	A, (CFG_CARD1)
+	CP	B
+	JR	Z, TCFG_ASK_CARD2_SAME
+	RET
+TCFG_ASK_CARD2_SAME:
+	LD	DE, MSG_CARD_SAME
+	CALL	PRTSTR
+	CALL	CRLF
+	JR	TCFG_ASK_CARD2_0
+TCFG_ASK_C2_MSX:
+	LD	A, AY_CARD_MSX
+	JR	TCFG_ASK_C2_STORE
+TCFG_ASK_C2_RC:
+	LD	A, AY_CARD_RC
+	JR	TCFG_ASK_C2_STORE
+TCFG_ASK_C2_EB:
+	LD	A, AY_CARD_EB
+	JR	TCFG_ASK_C2_STORE
+TCFG_ASK_C2_COLECO:
+	LD	A, AY_CARD_COLECO
+TCFG_ASK_C2_STORE:
+	LD	B, A
+	LD	A, (CFG_CARD1)
+	CP	B
+	LD	A, B
+	JR	Z, TCFG_ASK_CARD2_SAME
+	LD	(CFG_CARD2), A
+	RET
+
+PRINT_CARD_NAME:
+	CP	AY_CARD_MSX
+	JR	Z, PRINT_CARD_MSX
+	CP	AY_CARD_RC
+	JR	Z, PRINT_CARD_RC
+	CP	AY_CARD_EB
+	JR	Z, PRINT_CARD_EB
+	CP	AY_CARD_COLECO
+	JR	Z, PRINT_CARD_COLECO
+	LD	DE, MSG_CARD_AUTO
+	JP	PRTSTR
+PRINT_CARD_MSX:
+	LD	DE, MSG_CARD_MSX
+	JP	PRTSTR
+PRINT_CARD_RC:
+	LD	DE, MSG_CARD_RC
+	JP	PRTSTR
+PRINT_CARD_EB:
+	LD	DE, MSG_CARD_EB
+	JP	PRTSTR
+PRINT_CARD_COLECO:
+	LD	DE, MSG_CARD_COLECO
+	JP	PRTSTR
+
+;-------------------------------------------------------------------------------
+; TurboSound hardware topology: 0=auto, 1=dual-card, 2=AVR module
 ;-------------------------------------------------------------------------------
 TCFG_ASK_TS:
 TCFG_ASK_TS0:
@@ -584,6 +787,8 @@ TCFG_ASK_TS_KEEP:
 TCFG_ASK_TS_AUTO:
 	XOR	A
 	LD	(CFG_TSTOPO), A
+	XOR	A
+	LD	(CFG_CARD2), A
 	RET
 TCFG_ASK_TS_DUAL:
 	LD	A, TS_TOPO_DUALCARD
@@ -592,6 +797,8 @@ TCFG_ASK_TS_DUAL:
 TCFG_ASK_TS_MOD:
 	LD	A, TS_TOPO_MODULE
 	LD	(CFG_TSTOPO), A
+	XOR	A
+	LD	(CFG_CARD2), A
 	RET
 
 PRINT_TS_NAME:
@@ -649,9 +856,14 @@ TCFG_SIZE_GETKEY:
 	CALL	TCFG_GETCH
 	CP	27
 	RET	NZ
+	; Esc may start an arrow CSI (Esc [ A). Poll briefly for a follower;
+	; do not call blocking GETKEY with no char ready (ZPM3/BDOS 6 can
+	; wait forever — that forced a second Esc to "complete" the wait).
 	CALL	TCFG_GETCH_TO
 	OR	A
 	JR	Z, TCFG_SIZE_GETKEY_ESC
+	CP	27
+	JR	Z, TCFG_SIZE_GETKEY_ESC	; Esc Esc → quit
 	CP	'['
 	JR	Z, TCFG_SIZE_GETKEY_SEQ
 	CP	'O'
@@ -685,12 +897,8 @@ TCFG_SIZE_GETKEY_SEQ1:
 	CP	$40
 	JR	C, TCFG_SIZE_GETKEY_SEQ0
 	CP	$7F
-	JR	C, TCFG_SIZE_GETKEY_NONE
+	JR	C, TCFG_SIZE_GETKEY_ESC	; unknown Esc-seq → quit (was: ignore)
 	JR	TCFG_SIZE_GETKEY_SEQ0
-
-TCFG_SIZE_GETKEY_NONE:
-	XOR	A
-	RET
 
 TCFG_SIZE_GETKEY_UP:
 	LD	A, 'w'
@@ -712,12 +920,28 @@ TCFG_SIZE_GETKEY_ESC:
 	LD	A, 27
 	RET
 
+; Non-blocking peek with short spin. A=char (NZ) or A=0 (Z) on timeout.
+; Uses BDOS CONST (11) so we never block in GETKEY when the buffer is empty.
 TCFG_GETCH_TO:
-	LD	B, 32
+	LD	BC, 8000		; ~brief settle for CSI tails on serial
 TCFG_GETCH_TO0:
+	PUSH	BC
+	LD	C, 11			; BDOS console status
+	CALL	BDOS
+	OR	A
+	JR	Z, TCFG_GETCH_TO1
 	CALL	GETKEY
+	POP	BC
+	OR	A
 	RET	NZ
-	DJNZ	TCFG_GETCH_TO0
+	JR	TCFG_GETCH_TO2
+TCFG_GETCH_TO1:
+	POP	BC
+TCFG_GETCH_TO2:
+	DEC	BC
+	LD	A, B
+	OR	C
+	JR	NZ, TCFG_GETCH_TO0
 	XOR	A
 	RET
 
@@ -1691,10 +1915,34 @@ MSG_CFGANSI:
 	.DB	"  ANSI colour: ", 0
 MSG_CFGSIZE:
 	.DB	"  Size: ", 0
+MSG_CFGCARD1:
+	.DB	"  Primary AY: ", 0
+MSG_CFGCARD2:
+	.DB	"  Second AY:  ", 0
 MSG_CFGTS:
 	.DB	"  TurboSound: ", 0
+MSG_CARD1MENU:
+	.DB	"Primary sound card? A=auto-detect, M=MSX ($A0/$A1), R=RC2014 ($D8/$D0), E=EB ($68/$60), C=Coleco ($50/$51)", 0
+MSG_CARD2MENU:
+	.DB	"Second sound card (dual)? M=MSX, R=RC2014, E=EB, C=Coleco (must differ from primary)", 0
+MSG_CARDPROMPT:
+	.DB	"Choice [Enter keeps ", 0
+MSG_CARD_AUTO:
+	.DB	"auto-detect", 0
+MSG_CARD_NONE:
+	.DB	"(not set)", 0
+MSG_CARD_MSX:
+	.DB	"MSX ($A0H/$A1H)", 0
+MSG_CARD_RC:
+	.DB	"RC2014 ($D8H/$D0H)", 0
+MSG_CARD_EB:
+	.DB	"EB ($68H/$60H)", 0
+MSG_CARD_COLECO:
+	.DB	"Coleco ($50H/$51H)", 0
+MSG_CARD_SAME:
+	.DB	"Second card must differ from primary.", 0
 MSG_TSMENU:
-	.DB	"TurboSound hardware? A=auto-detect, D=dual card, M=single-card AVR module", 0
+	.DB	"TurboSound mode? A=auto (Hi-Z=>AVR module), D=dual card (needs second AY in CFG), M=AVR module FF/FE", 0
 MSG_TSPROMPT:
 	.DB	"Choice [Enter keeps ", 0
 MSG_TS_AUTO:
@@ -1763,7 +2011,7 @@ TOK_VERIFY:
 CFG_NAME:
 	.DB	"VTUNE   CFG"
 
-; Config record (kept contiguous, term/flags/rows/cols/tstopo, for verify compare)
+; Config record (contiguous for verify compare)
 CFG_TERM:
 	.DB	TERM_PLAIN
 CFG_FLAGS:
@@ -1774,8 +2022,12 @@ CFG_COLS:
 	.DB	CFG_DFL_COLS
 CFG_TSTOPO:
 	.DB	TS_TOPO_AUTO
+CFG_CARD1:
+	.DB	AY_CARD_AUTO
+CFG_CARD2:
+	.DB	AY_CARD_AUTO
 BEFORE_TERM:
-	.DB	0, 0, 0, 0, 0
+	.DB	0, 0, 0, 0, 0, 0, 0
 ARG_TERM:
 	.DB	TERM_PLAIN
 CFG_LOAD_STAT:
