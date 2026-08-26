@@ -1,5 +1,5 @@
 ;===============================================================================
-; uian.inc — ANSI/VT100 playlist UI for VibeTune
+; ansiui.inc — ANSI/VT100 playlist UI for VibeTune
 ;
 ; Ported from the old VibeTune (SHOWPLSTATUS / UI_* / TCFG_* blocks) and adapted to
 ; the current TRACK_LIST storage (13-byte NUL-terminated "NAME.EXT" entries).

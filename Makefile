@@ -4,7 +4,7 @@ TOOLS = ../RomWBW/Tools
 
 include $(TOOLS)/Makefile.inc
 
-DEPS := vibetune.asm vtversion.inc timing.inc pt3bulba.inc pt3bulba_shim.inc uian.inc
+DEPS := vibetune.asm vtversion.inc timing.inc pt3bulba.inc pt3bulba_shim.inc ansiui.inc
 
 vtune.com: $(DEPS)
 	$(TASM) -dWBW vibetune.asm vtune.com vtune.lst

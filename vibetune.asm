@@ -2239,7 +2239,7 @@ PLAYBACK_TICK_DONE:
 
 #include "timing.inc"
 
-#include "uian.inc"
+#include "ansiui.inc"
 
 #include "tsmodule.inc"
 
@@ -4755,7 +4755,7 @@ MSG_BANNER:
 ; Config file FCB name field: "VTUNE   " + "CFG" (exactly 11 bytes, space-padded)
 MSG_CFG_NAME:
 	.DB	"VTUNE   CFG"
-; Field prefixes, padded so values align at column 12 (see also uian.inc).
+; Field prefixes, padded so values align at column 12 (see also ansiui.inc).
 MSG_INPUT:
 	.DB	"Input file: ", 0
 MSG_FTYPE_REG:
