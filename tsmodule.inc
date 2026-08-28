@@ -63,4 +63,19 @@ TSMOD_MUTE:
 	CALL	TSMOD_SELECT
 	CALL	PSG_MUTE_ROUT
 	LD	A, $FF			; leave chip 0 selected
+	CALL	TSMOD_SELECT
+	JP	RESTORE_PLAY_PSG_PORTS
+
+;----------------------------------------------------------------------
+; TS_END_DUAL_SESSION — before single-chip (non-TS) playback after a
+; TurboSound track. Re-select module chip 0 (sticky FF/FE latch).
+; Keep MODULE topology for the session — this hardware needs FF/FE on
+; every ROUT; reverting to AUTO leaves chip 2 latched and adds noise.
+;----------------------------------------------------------------------
+TS_END_DUAL_SESSION:
+	CALL	RESTORE_PLAY_PSG_PORTS
+	LD	A, (TS_TOPOLOGY)
+	CP	TS_TOPO_MODULE
+	RET	NZ
+	LD	A, $FF
 	JP	TSMOD_SELECT

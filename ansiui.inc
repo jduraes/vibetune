@@ -27,6 +27,7 @@
 #DEFINE UI_ROW_PLLIST 9
 
 #DEFINE UI_TILE_W     16	; marker(1) + name(12) + gap(3)
+#DEFINE UI_VALUE_COL  13	; value column after "Label:      " prefixes
 
 ;-------------------------------------------------------------------------------
 ; Mode setup
@@ -472,6 +473,64 @@ UI_DRAW_STATE_PAUSED:
 	LD	DE, MSG_STATE_PAUSED
 	CALL	PRTSTR
 	JP	TCFG_COL_RST
+
+; Erase from cursor to end of line (ESC [ K).
+TCFG_EL_EOL:
+	PUSH	AF
+	LD	A, (DISP_MODE)
+	OR	A
+	JR	NZ, TCFG_EL_EOL1
+	LD	A, (CFG_FLAGS)
+	AND	$01
+	JR	Z, TCFG_EL_EOL0
+TCFG_EL_EOL1:
+	LD	DE, UI_SEQ_EL
+	CALL	PRTSTR
+TCFG_EL_EOL0:
+	POP	AF
+	RET
+
+; Position at row B / UI_VALUE_COL and erase the value field only.
+UI_GOTO_VALUE_ROW:
+	LD	C, UI_VALUE_COL
+	CALL	TCFG_ANSI_AT
+	JP	TCFG_EL_EOL
+
+;-------------------------------------------------------------------------------
+; Incremental track-status refresh (list mode track switch).
+; Updates only the value columns on rows 4-7; playlist marker is separate
+; (UI_UPDATE_MARKER_DELTA). No row clears, no footer redraw.
+;-------------------------------------------------------------------------------
+
+UI_TRACK_STATUS_UPDATE:
+	LD	A, (UI_ACTIVE)
+	OR	A
+	RET	Z
+	LD	B, UI_ROW_INFO
+	CALL	UI_GOTO_VALUE_ROW
+	LD	DE, ARG_BUFFER
+	CALL	PRTSTR
+	LD	A, (TSFLAG)
+	OR	A
+	JR	NZ, UI_TSU_TS
+	LD	DE, MSG_FTYPE_REG
+	JR	UI_TSU_FTYPE
+UI_TSU_TS:
+	LD	DE, MSG_FTYPE_TS
+UI_TSU_FTYPE:
+	CALL	PRTSTR
+	LD	B, UI_ROW_META1
+	CALL	UI_GOTO_VALUE_ROW
+	LD	HL, METATITLE
+	CALL	UI_PRT_META32
+	LD	B, UI_ROW_META2
+	CALL	UI_GOTO_VALUE_ROW
+	LD	HL, METAARTIST
+	CALL	UI_PRT_META32
+	LD	B, UI_ROW_INFO2
+	CALL	UI_GOTO_VALUE_ROW
+	CALL	PRINT_PLAYBACK_HW_VALUE
+	JP	UI_CURSOR_ON_SELECTED
 
 ;-------------------------------------------------------------------------------
 ; Track status block (rows 4-7): input+type, metadata, hardware
@@ -1137,6 +1196,8 @@ UI_SEQ_CLR:
 	.DB	27, '[', '2', 'J', 27, '[', 'H', 0
 UI_SEQ_EL2:
 	.DB	27, '[', '2', 'K', 0
+UI_SEQ_EL:
+	.DB	27, '[', 'K', 0
 UI_SEQ_CYAN:
 	.DB	27, '[', '3', '6', 'm', 0
 UI_SEQ_YEL:

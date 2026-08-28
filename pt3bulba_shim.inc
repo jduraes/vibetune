@@ -29,9 +29,10 @@ SLOWIO:
 NORMIO:
 	JP	PSG_IO_SLOW_EXIT
 
-; Copy RomWBW-detected / CLI-selected ports into Bulba ROUT layout (RSEL, RDAT).
-; Does not choose ports — DETECT_HARDWARE_CONFIG sets PSG_REG_PORT/PSG_DATA_PORT.
+; Copy configured play ports into runtime globals and Bulba ROUT layout.
+; RESTORE first: dual-card TS mute may have left PSG_REG_PORT on chip2.
 BULBA_SYNC_PORTS:
+	CALL	RESTORE_PLAY_PSG_PORTS
 	LD	A, (PSG_REG_PORT)
 	LD	(BULBA_PORTS + 0), A
 	LD	A, (PSG_DATA_PORT)
