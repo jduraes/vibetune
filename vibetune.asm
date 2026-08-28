@@ -128,8 +128,8 @@
 #DEFINE KEY_NAV_RIGHT 'D'
 #DEFINE KEY_NAV_RIGHT_L 'd'
 ; Paused-browse debounce: frames (~20 ms each) to wait after the last nav
-; move before reloading the selected track (~1 s at 50).
-#DEFINE NAV_DEBOUNCE_LEN 50
+; move before reloading the selected track (~1.5 s at 75).
+#DEFINE NAV_DEBOUNCE_LEN 75
 ; Quark delay removed — use timing.inc WAITQ (CPU-calibrated ~20 ms/quark).
 
 ; Startup run mode
