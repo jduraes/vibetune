@@ -102,8 +102,8 @@ dual-assembler clean (`#IF`/`#ENDIF`, explicit `(IX+0)` displacements).
 Outputs are copied to `../RomWBW/Binary/Apps/`.
 
 Key sources: `vibetune.asm`, `ansiui.inc`, `pt3bulba.inc` /
-`pt3bulba_shim.inc`, `timing.inc`, `tsmodule.inc`, `vtunecfg.asm`,
-`vtversion.inc`.
+`pt3shim.inc`, `timing.inc`, `tsmodule.inc`, `vtunecfg.asm`,
+`vtver.inc`.
 
 ## Docs
 

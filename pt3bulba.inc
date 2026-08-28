@@ -2,7 +2,7 @@
 ; Original: Universal PT2 and PT3 player Release 1
 ; (c) 2004-2007 S.V.Bulba <vorobey@mail.khstu.ru>
 ; http://bulba.untergrund.net (http://bulba.at.kz)
-; See pt3bulba_shim.inc for PORTS/Z180/SLOWIO and VARS equates.
+; See pt3shim.inc for PORTS/Z180/SLOWIO and VARS equates.
 
 TonA	.EQU 0
 TonB	.EQU 2

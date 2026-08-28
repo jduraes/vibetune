@@ -18,7 +18,7 @@
 #include "../RomWBW/Source/ver.inc"
 #include "../RomWBW/Source/Apps/Tune/cpm.inc"
 #include "../RomWBW/Source/HBIOS/hbios.inc"
-#include "vtversion.inc"
+#include "vtver.inc"
 
 #DEFINE ERR_OK 0
 #DEFINE ERR_NO_ARG 1
@@ -2254,7 +2254,7 @@ PLAYBACK_TICK_DONE:
 ;-------------------------------------------------------------------------------
 ; Milestone 5: PTx engine — PT3 uses Bulba player from tune.asm (pt3bulba.inc).
 ;-------------------------------------------------------------------------------
-#include "pt3bulba_shim.inc"
+#include "pt3shim.inc"
 #include "pt3bulba.inc"
 
 #include "timing.inc"

@@ -25,7 +25,7 @@
 
 #include "../RomWBW/Source/ver.inc"
 #include "../RomWBW/Source/Apps/Tune/cpm.inc"
-#include "vtversion.inc"
+#include "vtver.inc"
 
 #DEFINE CFG_MAGIC $A5
 
