@@ -3759,6 +3759,10 @@ MAIN_RELOAD_PLAYING:
 	LD	A, PLAY_PLAYING
 	LD	(PLAY_STATE), A
 MAIN_RELOAD_STATE_OK:
+	; Keys pressed during the reload disk I/O sat unread in the console
+	; buffer; feeding them to the key handler now would parse half-arrived
+	; Esc sequences out of context. Ignore input typed while loading.
+	CALL	FLUSH_KEYS
 	LD	A, PLAY_PLAYING
 	LD	(NAV_SAVED_STATE), A	; consume: default is always play
 	LD	A, (UI_ACTIVE)
