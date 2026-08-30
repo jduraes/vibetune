@@ -1,0 +1,13 @@
+  -help     Show this help
+  -credits  Show copyright and attribution
+  -list     Playlist mode: play all PT2/PT3 on the current drive
+  -loop     Loop playback: playlist in -list mode, single track otherwise
+  -delay    Force delay-loop timing instead of the HBIOS hardware timer
+  -msx      Force MSX standard PSG ports ($A0/$A1)
+  -rc       Force RC2014 standard PSG ports ($D8/$D0)
+  -coleco   Force Coleco PSG ports ($50/$51)
+  -eb       Force Ed Brindley (EB) sound module ports ($68/$60)
+  -tsm      Force TurboSound dual-AVR module mode (0xFF/0xFE); auto if Hi-Z
+
+Playlist keys: Esc=quit, Space=pause, Enter=play (when paused), N/P=track,
+  WASD/arrows=nav, Delx3=delete, R=redraw, l/L=loop track/playlist

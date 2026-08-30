@@ -172,10 +172,12 @@ UI_SHOWPL_MARKED:
 UI_SHOWPL_NEXT:
 	DEC	B
 	JP	NZ, UI_SHOWPL_LOOP
-	JP	UI_SHOW_FOOTER
+	CALL	TCFG_COL_RST		; belt: metadata/footer follow with default SGR
+	RET
 UI_SHOWPL_DONE:
 	POP	BC
-	JP	UI_SHOW_FOOTER
+	CALL	TCFG_COL_RST
+	RET
 
 ;-------------------------------------------------------------------------------
 ; HL = TRACK_LIST + A * TRACK_NAME_LEN
@@ -205,7 +207,10 @@ UI_TRACK_PTR2:
 UI_PRT_TILE:
 	LD	A, (UI_MARK)
 	CP	'>'
-	JR	NZ, UI_PRT_TILE1
+	JR	Z, UI_PRT_TILE_YEL
+	CALL	TCFG_COL_RST		; clear prior selection highlight
+	JR	UI_PRT_TILE1
+UI_PRT_TILE_YEL:
 	CALL	TCFG_COL_PRM
 UI_PRT_TILE1:
 	LD	A, (UI_MARK)
@@ -231,11 +236,66 @@ UI_PRT_TILE5:
 	LD	A, ' '
 	CALL	PRTCHR
 	DJNZ	UI_PRT_TILE5
+	CALL	TCFG_COL_RST		; always drop SGR after each tile
+	RET
+
+; Print UI_MARK with optional yellow highlight for '>'.
+UI_PRT_MARK:
 	LD	A, (UI_MARK)
 	CP	'>'
-	JR	NZ, UI_PRT_TILE6
+	JR	NZ, UI_PRT_MARK1
+	CALL	TCFG_COL_PRM
+UI_PRT_MARK1:
+	LD	A, (UI_MARK)
+	CALL	PRTCHR
+	LD	A, (UI_MARK)
+	CP	'>'
+	JR	NZ, UI_PRT_MARK2
 	CALL	TCFG_COL_RST
-UI_PRT_TILE6:
+UI_PRT_MARK2:
+	RET
+
+; Index in A → tile origin B=row, C=col (1-based). CY if off-screen.
+UI_TILE_AT_INDEX:
+	PUSH	DE
+	PUSH	HL
+	PUSH	AF			; save entry index (UI_CALC_COLS clobbers A)
+	CALL	UI_CALC_COLS
+	POP	AF
+	LD	E, A
+	XOR	A
+	LD	D, A			; row offset from UI_ROW_PLLIST
+	LD	A, (UI_PLCOLS)
+	LD	L, A
+UI_TILE_AT_INDEX1:
+	LD	A, E
+	CP	L
+	JR	C, UI_TILE_AT_INDEX2
+	SUB	L
+	LD	E, A
+	INC	D
+	JR	UI_TILE_AT_INDEX1
+UI_TILE_AT_INDEX2:
+	LD	A, UI_ROW_PLLIST
+	ADD	A, D
+	LD	B, A
+	LD	A, (CFG_ROWS)
+	CP	B
+	JR	NC, UI_TILE_AT_INDEX3
+	SCF
+	JR	UI_TILE_AT_INDEXX
+UI_TILE_AT_INDEX3:
+	LD	A, E
+	ADD	A, A
+	ADD	A, A
+	ADD	A, A
+	ADD	A, A			; * UI_TILE_W (16)
+	INC	A
+	LD	C, A
+	AND	A
+UI_TILE_AT_INDEXX:
+	POP	HL
+	POP	DE
 	RET
 
 ;-------------------------------------------------------------------------------
@@ -244,44 +304,35 @@ UI_PRT_TILE6:
 
 UI_DRAW_PL_ENTRY:
 	PUSH	AF
+	LD	(UI_IDXTMP), A
 	PUSH	BC
 	PUSH	DE
 	PUSH	HL
-	LD	(UI_IDXTMP), A
-	CALL	UI_CALC_COLS
 	LD	A, (UI_IDXTMP)
-	LD	E, A			; index remainder
-	XOR	A
-	LD	D, A			; row offset
-	LD	A, (UI_PLCOLS)
-	LD	L, A			; entries per row
-UI_DRAW_PL_ENTRY1:
-	LD	A, E
-	CP	L
-	JR	C, UI_DRAW_PL_ENTRY2
-	SUB	L
-	LD	E, A
-	INC	D
-	JR	UI_DRAW_PL_ENTRY1
-UI_DRAW_PL_ENTRY2:
-	LD	A, UI_ROW_PLLIST
-	ADD	A, D
-	LD	B, A			; row
-	LD	A, (CFG_ROWS)
-	CP	B
-	JR	C, UI_DRAW_PL_ENTRYX	; off-screen — nothing to draw
-	LD	A, E
-	ADD	A, A
-	ADD	A, A
-	ADD	A, A
-	ADD	A, A			; *16
-	INC	A			; column origin is 1
-	LD	C, A
+	CALL	UI_TILE_AT_INDEX
+	JR	C, UI_DRAW_PL_ENTRYX
 	CALL	TCFG_ANSI_AT
 	LD	A, (UI_IDXTMP)
 	CALL	UI_TRACK_PTR
 	CALL	UI_PRT_TILE
 UI_DRAW_PL_ENTRYX:
+	POP	HL
+	POP	DE
+	POP	BC
+	POP	AF
+	RET
+
+; Marker char only at tile origin (UI_MARK). IN: A = entry index.
+UI_DRAW_MARKER_ONLY:
+	PUSH	AF
+	PUSH	BC
+	PUSH	DE
+	PUSH	HL
+	CALL	UI_TILE_AT_INDEX
+	JR	C, UI_DRAW_MARKER_ONLYX
+	CALL	TCFG_ANSI_AT
+	CALL	UI_PRT_MARK
+UI_DRAW_MARKER_ONLYX:
 	POP	HL
 	POP	DE
 	POP	BC
@@ -299,7 +350,7 @@ UI_UPDATE_MARKER_DELTA:
 	LD	A, ' '
 	LD	(UI_MARK), A
 	LD	A, (TRACK_OLD)
-	CALL	UI_DRAW_PL_ENTRY
+	CALL	UI_DRAW_PL_ENTRY	; full tile — clears yellow highlight on name
 	LD	A, '>'
 	LD	(UI_MARK), A
 	LD	A, (TRACK_SELECTED)
@@ -322,35 +373,9 @@ UI_CURSOR_ON_SELECTED:
 	PUSH	BC
 	PUSH	DE
 	PUSH	HL
-	CALL	UI_CALC_COLS
 	LD	A, (TRACK_SELECTED)
-	LD	E, A			; column index within row
-	XOR	A
-	LD	D, A			; row offset from UI_ROW_PLLIST
-	LD	A, (UI_PLCOLS)
-	LD	L, A
-UI_CUR_MARK1:
-	LD	A, E
-	CP	L
-	JR	C, UI_CUR_MARK2
-	SUB	L
-	LD	E, A
-	INC	D
-	JR	UI_CUR_MARK1
-UI_CUR_MARK2:
-	LD	A, UI_ROW_PLLIST
-	ADD	A, D
-	LD	B, A
-	LD	A, (CFG_ROWS)
-	CP	B
-	JR	C, UI_CUR_MARKX		; off-screen
-	LD	A, E
-	ADD	A, A
-	ADD	A, A
-	ADD	A, A
-	ADD	A, A			; * UI_TILE_W (16)
-	INC	A			; 1-based column of '>'
-	LD	C, A
+	CALL	UI_TILE_AT_INDEX
+	JR	C, UI_CUR_MARKX
 	CALL	TCFG_ANSI_AT
 UI_CUR_MARKX:
 	POP	HL
@@ -449,46 +474,33 @@ UI_STATUS_PAUSED:
 	JP	UI_CURSOR_ON_SELECTED
 
 UI_DRAW_STATE_PLAYING:
-	CALL	UI_FOOTER_STATE_ROW
-	RET	C
-	PUSH	BC
-	CALL	UI_CLR_ROW
-	POP	BC
-	LD	C, 1
-	CALL	TCFG_ANSI_AT
-	CALL	TCFG_COL_OK
-	LD	DE, MSG_STATE_PLAYING
-	CALL	PRTSTR
-	JP	TCFG_COL_RST
-
+	XOR	A
+	JR	UI_DRAW_STATE_BODY
 UI_DRAW_STATE_PAUSED:
+	LD	A, 1
+UI_DRAW_STATE_BODY:
+	PUSH	AF
 	CALL	UI_FOOTER_STATE_ROW
+	POP	AF
 	RET	C
+	PUSH	AF
 	PUSH	BC
 	CALL	UI_CLR_ROW
 	POP	BC
+	POP	AF
 	LD	C, 1
 	CALL	TCFG_ANSI_AT
-	CALL	TCFG_COL_PRM
+	OR	A
+	CALL	NZ, TCFG_COL_PRM
+	CALL	Z, TCFG_COL_OK
+	JR	NZ, UI_DRAW_STATE_PAUSED_MSG
+	LD	DE, MSG_STATE_PLAYING
+	JR	UI_DRAW_STATE_PRT
+UI_DRAW_STATE_PAUSED_MSG:
 	LD	DE, MSG_STATE_PAUSED
+UI_DRAW_STATE_PRT:
 	CALL	PRTSTR
 	JP	TCFG_COL_RST
-
-; Erase from cursor to end of line (ESC [ K).
-TCFG_EL_EOL:
-	PUSH	AF
-	LD	A, (DISP_MODE)
-	OR	A
-	JR	NZ, TCFG_EL_EOL1
-	LD	A, (CFG_FLAGS)
-	AND	$01
-	JR	Z, TCFG_EL_EOL0
-TCFG_EL_EOL1:
-	LD	DE, UI_SEQ_EL
-	CALL	PRTSTR
-TCFG_EL_EOL0:
-	POP	AF
-	RET
 
 ; Position at row B / UI_VALUE_COL and erase the value field only.
 UI_GOTO_VALUE_ROW:
@@ -530,7 +542,7 @@ UI_TSU_FTYPE:
 	LD	B, UI_ROW_INFO2
 	CALL	UI_GOTO_VALUE_ROW
 	CALL	PRINT_PLAYBACK_HW_VALUE
-	JP	UI_CURSOR_ON_SELECTED
+	RET
 
 ;-------------------------------------------------------------------------------
 ; Track status block (rows 4-7): input+type, metadata, hardware
@@ -550,6 +562,7 @@ UI_TSB_CLEAR:
 	INC	B
 	JR	UI_TSB_CLEAR
 UI_TSB_INFO:
+	CALL	TCFG_COL_RST		; playlist may have left SGR yellow active
 	LD	B, UI_ROW_INFO
 	LD	C, 1
 	CALL	TCFG_ANSI_AT
@@ -563,8 +576,14 @@ UI_TSB_INFO:
 	; when reloading into a paused state).
 	LD	A, (PLAY_STATE)
 	CP	PLAY_PAUSED
-	JP	Z, UI_STATUS_PAUSED
-	JP	UI_STATUS_PLAYING
+	JP	Z, UI_TSB_PAUSED
+	JP	UI_TSB_PLAYING
+UI_TSB_PAUSED:
+	CALL	UI_STATUS_PAUSED
+	JP	UI_SHOW_LOOP_STATUS
+UI_TSB_PLAYING:
+	CALL	UI_STATUS_PLAYING
+	JP	UI_SHOW_LOOP_STATUS
 
 ;-------------------------------------------------------------------------------
 ; Full UI redraw (R key): frame + playlist + status block
@@ -724,19 +743,37 @@ UI_EXIT_PROMPT5:
 ; Erase rows UI_ROW_PLLIST .. CFG_ROWS
 ;-------------------------------------------------------------------------------
 
+; Erase playlist rows plus State/Loop footer rows (not the whole screen).
 UI_CLEAR_PLAYLIST:
 	PUSH	AF
 	PUSH	BC
+	PUSH	DE
+	CALL	UI_PL_ROWS		; clobbers C — set the start row only after this
+	LD	E, A
 	LD	A, UI_ROW_PLLIST
-	LD	B, A
-UI_CLEAR_PLAYLIST1:
+	ADD	A, E
+	INC	A			; blank line after tiles
+	INC	A			; State row
+	INC	A			; Loop row (+1 row: also cover a shrunk prior list)
+	LD	E, A			; last row to clear
 	LD	A, (CFG_ROWS)
-	CP	B
+	CP	E
+	JR	NC, UI_CLEAR_PLAYLIST0
+	LD	E, A
+UI_CLEAR_PLAYLIST0:
+	LD	C, UI_ROW_PLLIST	; first row to clear
+UI_CLEAR_PLAYLIST1:
+	LD	A, E
+	CP	C
 	JR	C, UI_CLEAR_PLAYLIST2
+	PUSH	BC
+	LD	B, C
 	CALL	UI_CLR_ROW
-	INC	B
+	POP	BC
+	INC	C
 	JR	UI_CLEAR_PLAYLIST1
 UI_CLEAR_PLAYLIST2:
+	POP	DE
 	POP	BC
 	POP	AF
 	RET
@@ -750,8 +787,6 @@ UI_CLR_ROW:
 	LD	C, 1
 	CALL	TCFG_ANSI_AT
 	CALL	TCFG_EL2
-	LD	C, 1
-	CALL	TCFG_ANSI_AT
 	POP	HL
 	POP	DE
 	POP	BC
@@ -761,6 +796,15 @@ UI_CLR_ROW:
 ;-------------------------------------------------------------------------------
 ; Low-level ANSI emitters (only called on UI-active paths)
 ;-------------------------------------------------------------------------------
+
+; Z if plain mode without ANSI colour — skip CSI/SGR output.
+TCFG_ANSI_ON:
+	LD	A, (DISP_MODE)
+	OR	A
+	RET	NZ
+	LD	A, (CFG_FLAGS)
+	AND	$01
+	RET
 
 ; Cursor position: B = row, C = col (1-based).
 TCFG_ANSI_AT:
@@ -788,39 +832,32 @@ TCFG_ANSI_AT:
 	POP	AF
 	RET
 
-; Clear screen + home. Emits only when DISP_MODE <> plain or colour flag set.
-TCFG_CLRHOME:
+; Emit DE string when ANSI colour mode is active (DISP_MODE or CFG bit 0).
+TCFG_ANSI_STR:
 	PUSH	AF
-	LD	A, (DISP_MODE)
-	OR	A
-	JR	NZ, TCFG_CLRHOME1
-	LD	A, (CFG_FLAGS)
-	AND	$01
-	JR	Z, TCFG_CLRHOME0
-TCFG_CLRHOME1:
-	LD	DE, UI_SEQ_CLR
+	CALL	TCFG_ANSI_ON
+	JR	Z, TCFG_ANSI_STR0
 	CALL	PRTSTR
-TCFG_CLRHOME0:
+TCFG_ANSI_STR0:
 	POP	AF
 	RET
+
+; Clear screen + home. Emits only when DISP_MODE <> plain or colour flag set.
+TCFG_CLRHOME:
+	LD	DE, UI_SEQ_CLR
+	JP	TCFG_ANSI_STR
 
 ; Erase current line (ESC[2K), same gating as TCFG_CLRHOME.
 TCFG_EL2:
-	PUSH	AF
-	LD	A, (DISP_MODE)
-	OR	A
-	JR	NZ, TCFG_EL21
-	LD	A, (CFG_FLAGS)
-	AND	$01
-	JR	Z, TCFG_EL20
-TCFG_EL21:
 	LD	DE, UI_SEQ_EL2
-	CALL	PRTSTR
-TCFG_EL20:
-	POP	AF
-	RET
+	JP	TCFG_ANSI_STR
 
-; Colour helpers (emit only when the ANSI-colour flag is set).
+; Erase from cursor to end of line (ESC [ K).
+TCFG_EL_EOL:
+	LD	DE, UI_SEQ_EL
+	JP	TCFG_ANSI_STR
+
+; Cursor position: B = row, C = col (1-based).
 TCFG_COL_HDR:
 	LD	DE, UI_SEQ_CYAN
 	JP	TCFG_EMIT
@@ -1053,6 +1090,30 @@ UI_NAV_RIGHT_WRAP:
 	SUB	B			; row start
 	RET
 
+; Wait up to B polls for a console byte. Returns char in A, 0 if timeout.
+; Uses BDOS CONST (11) so we never block inside UI_ESC_SEQ.
+UI_ESC_GETCH:
+	PUSH	BC
+UI_ESC_GETCH1:
+	PUSH	BC
+	LD	C, $0B
+	CALL	BDOS
+	OR	A
+	JR	Z, UI_ESC_GETCH2
+	LD	C, $06
+	LD	E, $FF
+	CALL	BDOS
+	POP	BC
+	POP	BC
+	AND	$7F
+	RET
+UI_ESC_GETCH2:
+	POP	BC
+	DJNZ	UI_ESC_GETCH1
+	POP	BC
+	XOR	A
+	RET
+
 ; Called after Esc in UI mode: give an escape sequence a short window to
 ; arrive (arrow keys = ESC [ A/B/C/D or ESC O A/B/C/D; keypad Enter = ESC O M).
 ; Returns A=0 bare Esc (quit), A=1 sequence consumed, A=2 delete, A=3 Enter.
@@ -1061,41 +1122,24 @@ UI_ESC_SEQ:
 	LD	A, $FF
 	LD	(UI_IDXTMP), A
 	LD	B, $40			; spin count waiting for the introducer
-UI_ESC_SEQ1:
-	PUSH	BC
-	LD	C, $06
-	LD	E, $FF
-	CALL	BDOS
-	POP	BC
+	CALL	UI_ESC_GETCH
 	OR	A
-	JR	NZ, UI_ESC_SEQ2
-	DJNZ	UI_ESC_SEQ1
-	XOR	A			; bare Esc
-	RET
-UI_ESC_SEQ2:
-	AND	$7F
+	JR	Z, UI_ESC_SEQ0		; bare Esc
 	CP	'['
 	JR	Z, UI_ESC_SEQ_CSI
 	CP	'O'
 	JR	Z, UI_ESC_SEQ_SS3
 	LD	A, 1			; unknown sequence — swallow
 	RET
+UI_ESC_SEQ0:
+	XOR	A
+	RET
 
 UI_ESC_SEQ_CSI:
 	LD	B, $40
-UI_ESC_CSI1:
-	PUSH	BC
-	LD	C, $06
-	LD	E, $FF
-	CALL	BDOS
-	POP	BC
+	CALL	UI_ESC_GETCH
 	OR	A
-	JR	NZ, UI_ESC_CSI2
-	DJNZ	UI_ESC_CSI1
-	LD	A, 1			; incomplete — swallow
-	RET
-UI_ESC_CSI2:
-	AND	$7F
+	JR	Z, UI_ESC_SEQ1		; incomplete — swallow
 	CP	'3'
 	JR	Z, UI_ESC_DEL_TILDE
 	CP	'A'
@@ -1111,19 +1155,9 @@ UI_ESC_CSI2:
 
 UI_ESC_SEQ_SS3:
 	LD	B, $40
-UI_ESC_SS31:
-	PUSH	BC
-	LD	C, $06
-	LD	E, $FF
-	CALL	BDOS
-	POP	BC
+	CALL	UI_ESC_GETCH
 	OR	A
-	JR	NZ, UI_ESC_SS32
-	DJNZ	UI_ESC_SS31
-	LD	A, 1
-	RET
-UI_ESC_SS32:
-	AND	$7F
+	JR	Z, UI_ESC_SEQ1
 	CP	'M'
 	JR	Z, UI_ESC_ENTER		; keypad Enter
 	CP	'A'
@@ -1137,24 +1171,19 @@ UI_ESC_SS32:
 	LD	A, 1
 	RET
 
+UI_ESC_SEQ1:
+	LD	A, 1
+	RET
+
 UI_ESC_ENTER:
 	LD	A, 3
 	RET
 UI_ESC_DEL_TILDE:
 	; ESC [ 3 ~ = DEL key: consume the trailing '~', report A=2
 	LD	B, $40
-UI_ESC_DEL_T1:
-	PUSH	BC
-	LD	C, $06
-	LD	E, $FF
-	CALL	BDOS
-	POP	BC
+	CALL	UI_ESC_GETCH
 	OR	A
-	JR	NZ, UI_ESC_DEL_T2
-	DJNZ	UI_ESC_DEL_T1
-	LD	A, 1			; incomplete — swallow
-	RET
-UI_ESC_DEL_T2:
+	JR	Z, UI_ESC_SEQ1
 	LD	A, 2
 	RET
 UI_ESC_UP:

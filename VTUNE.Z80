@@ -1,0 +1,7 @@
+Cannot use these AY ports on this Z180 machine.
+  $D0/$D8 (-rc) overlap the Z180 internal I/O window
+  (RomWBW Z180_IO_BASE, usually $C0 on SC126).
+Reconfigure the sound card, then retry:
+  Rev5:  EB addressing  $60/$68  (vtune -eb)
+  Rev6.1: MSX $A0/$A1 (vtune -msx) or Coleco $50/$51 (-coleco)
+Aborting.

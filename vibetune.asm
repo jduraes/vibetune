@@ -1,5 +1,5 @@
 ;===============================================================================
-; VIBETUNE - PT2/PT3/MYM music player for RomWBW CP/M (vtune.com)
+; VIBETUNE - PT2/PT3 music player for RomWBW CP/M (vtune.com; optional MYM via -dMYM)
 ;===============================================================================
 ;
 ; Copyright (C) 2026, Joao Miguel Duraes (fackie), GNU GPL v3 (or later).
@@ -8,7 +8,7 @@
 ; Incorporates third-party player engines:
 ;   - Universal PT2/PT3 player (PTxPlayer) (c) 2004-2007 S.V.Bulba
 ;     <vorobey@mail.khstu.ru>  http://bulba.untergrund.net (pt3bulba*.inc)
-;   - MYMPlay 0.4 by Marq/Lieves!Tuore & Fit (MYM depack/play engine)
+;   - MYMPlay 0.4 by Marq/Lieves!Tuore & Fit (optional; mymeng.inc, -dMYM)
 ;
 ; This program is free software: you can redistribute it and/or modify it
 ; under the terms of the GNU General Public License as published by the
@@ -33,11 +33,9 @@
 
 #DEFINE ENGINE_NONE 0
 #DEFINE ENGINE_PTX 1
+#IFDEF MYM
 #DEFINE ENGINE_MYM 2
-
-#DEFINE PTX_VARIANT_UNKNOWN 0
-#DEFINE PTX_VARIANT_VORTEX 1
-#DEFINE PTX_VARIANT_PROTRACKER 2
+#ENDIF
 
 #DEFINE MAX_TRACKS 128
 #DEFINE TRACK_NAME_LEN 13
@@ -144,17 +142,13 @@ START:
 	CALL	HEAPENDB_INIT
 	XOR	A
 	LD	(RUN_MODE), A
-	LD	(PTX_VARIANT), A
 	LD	(AUDIO_OUT_MODE), A
-	LD	(PSG_HW_VALID), A
 	LD	(PLAY_STATE), A
 	LD	(PSG_TOUCHED), A
 	LD	(EXIT_MSG_ON), A
 	LD	(STATUS_MSG_PENDING), A
-	CALL	CRLF
-	LD	DE, MSG_BANNER
-	CALL	PRTSTR
-	CALL	CRLF
+	; Banner is printed later: by the error/usage paths, or after display-mode
+	; detection for plain modes. ANSI-list mode draws it inside the frame.
 	; All switches are detected by SCAN_CMDLINE_SWITCHES (inside
 	; PARSE_AND_CLASSIFY), which reads $0081 before any BDOS file I/O.
 	CALL	PARSE_AND_CLASSIFY
@@ -170,6 +164,7 @@ START:
 	JP	Z, START_FILE_NOT_FOUND
 	CP	ERR_UNKNOWN_SWITCH
 	JP	Z, START_UNKNOWN_SWITCH
+	CALL	PRINT_BANNER
 	LD	DE, MSG_ERR_UNSUPPORTED
 	CALL	PRTSTR
 	CALL	CRLF
@@ -185,6 +180,12 @@ START_AFTER_PARSE_OK:
 	CALL	APPLY_LOOP_REQ		; -loop: resolve now that run mode is known
 	; Do not probe/query the AY for usage-only or parse errors (avoids pops).
 	CALL	DETECT_DISPLAY_MODE
+	CALL	UI_SETUP		; decide ANSI-list before printing banner/timing
+	LD	A, (UI_ACTIVE)
+	OR	A
+	JR	NZ, START_NO_PLAIN_BANNER
+	CALL	PRINT_BANNER
+START_NO_PLAIN_BANNER:
 	CALL	DETECT_HARDWARE_CONFIG
 	CALL	PSG_MUTE_DIRECT		; Belt-and-suspenders: zero all PSG regs after probe
 	CALL	BULBA_SYNC_PORTS
@@ -193,8 +194,12 @@ START_AFTER_PARSE_OK:
 	CALL	TS_CAPTURE_PRISTINE
 	CALL	PROBETIMER
 	CALL	INIT_QDLY_BASE
+	LD	A, (UI_ACTIVE)
+	OR	A
+	JR	NZ, START_NO_PLAIN_TIMING
 	CALL	PRINT_TIMING_MODE
 	CALL	CRLF
+START_NO_PLAIN_TIMING:
 	LD	A, (RUN_MODE)
 	CP	RUNMODE_LIST
 	JP	Z, START_SCAN
@@ -224,6 +229,7 @@ START_VALIDATE_FILE_ERR:
 	JP	START_EXIT
 
 START_HELP:
+	CALL	PRINT_BANNER
 	CALL	PRINT_USAGE
 	LD	DE, MSG_HELP_TEXT
 	CALL	PRTSTR
@@ -231,18 +237,20 @@ START_HELP:
 	JP	START_EXIT
 
 ; Attribution lives here only (not on the plain usage screen).
-; The banner with version/date has already been printed at startup.
 START_CREDITS:
+	CALL	PRINT_BANNER
 	LD	DE, MSG_CREDITS
 	CALL	PRTSTR
 	CALL	CRLF
 	JP	START_EXIT
 
 START_NO_ARG:
+	CALL	PRINT_BANNER
 	CALL	PRINT_USAGE
 	JP	START_EXIT
 
 START_TOO_MANY:
+	CALL	PRINT_BANNER
 	LD	DE, MSG_ERR_TOO_MANY
 	CALL	PRTSTR
 	CALL	CRLF
@@ -250,6 +258,7 @@ START_TOO_MANY:
 	JP	START_EXIT
 
 START_UNKNOWN_SWITCH:
+	CALL	PRINT_BANNER
 	LD	DE, MSG_ERR_UNKNOWN_SWITCH_PFX
 	CALL	PRTSTR
 	LD	DE, ARG_SCRATCH		; bad token left by validator
@@ -261,6 +270,12 @@ START_UNKNOWN_SWITCH:
 	CALL	PRTSTR
 	CALL	CRLF
 	JP	START_EXIT
+
+PRINT_BANNER:
+	CALL	CRLF
+	LD	DE, MSG_BANNER
+	CALL	PRTSTR
+	JP	CRLF
 
 PRINT_USAGE:
 	LD	DE, MSG_USAGE
@@ -287,12 +302,14 @@ APPLY_LOOP_REQ_SET:
 	RET
 
 START_INVALID_FILENAME:
+	CALL	PRINT_BANNER
 	LD	DE, MSG_ERR_INVALID_FILENAME
 	CALL	PRTSTR
 	CALL	CRLF
 	JP	START_EXIT
 
 START_FILE_NOT_FOUND:
+	CALL	PRINT_BANNER
 	LD	DE, MSG_ERR_FILE_NOT_FOUND
 	CALL	PRTSTR
 	CALL	CRLF
@@ -367,8 +384,7 @@ START_LOAD_SHOW_STATE:
 	JP	MAIN_LOOP
 
 START_SCAN:
-	CALL	UI_SETUP
-	LD	A, (UI_ACTIVE)
+	LD	A, (UI_ACTIVE)		; UI_SETUP already ran after DETECT_DISPLAY_MODE
 	OR	A
 	JR	NZ, START_SCAN_UI
 	LD	DE, MSG_SCANNING
@@ -632,25 +648,7 @@ STRINDEX_UP_LEN_OK:
 ; Substring search in default FCB name+ext ($5D..$67, 11 bytes). Leading switches
 ; only (e.g. vtune -delay rl2wof). Interior NUL bytes are skipped, not fatal.
 STRINDEX_FCB:
-STRINDEX_FCB_TRY:
-	LD	A, B
-	OR	A
-	JR	Z, STRINDEX_FCB_FAIL
-	PUSH	HL
-	PUSH	DE
-	CALL	STRCMP_UP
-	POP	DE
-	POP	HL
-	JR	Z, STRINDEX_FCB_OK
-	INC	HL
-	DEC	B
-	JR	STRINDEX_FCB_TRY
-STRINDEX_FCB_FAIL:
-	OR	$FF
-	RET
-STRINDEX_FCB_OK:
-	XOR	A
-	RET
+	JP	STRINDEX_UP_LEN
 
 ; Z = found if needle appears in bounded CLI tail or default FCB name field.
 ; DE = needle on entry. Uses GET_CMD_TAIL_LEN (does not require HL=$81).
@@ -1209,8 +1207,10 @@ CLASS_SCAN_DONE:
 	CALL	TO_UPPER
 	CP	'P'
 	JR	Z, CLASS_TRY_PTX
+#IFDEF MYM
 	CP	'M'
 	JR	Z, CLASS_TRY_MYM
+#ENDIF
 	JR	CLASS_UNSUPPORTED
 
 CLASS_TRY_PTX:
@@ -1236,6 +1236,7 @@ CLASS_PTX_END:
 	XOR	A
 	RET
 
+#IFDEF MYM
 CLASS_TRY_MYM:
 	INC	HL
 	LD	A, (HL)
@@ -1255,6 +1256,7 @@ CLASS_TRY_MYM:
 	LD	(FILE_ENGINE), A
 	XOR	A
 	RET
+#ENDIF
 
 CLASS_UNSUPPORTED:
 	LD	A, ERR_UNSUPPORTED_FORMAT
@@ -1318,13 +1320,18 @@ RESOLVE_TRY_PT2:
 	JR	NZ, RESOLVE_FAIL_INVALID
 	CALL	PROBE_FCB_EXISTS
 	OR	A
+#IFDEF MYM
 	JR	Z, RESOLVE_TRY_MYM
+#ELSE
+	JR	Z, RESOLVE_FAIL_NOT_FOUND
+#ENDIF
 	LD	A, ENGINE_PTX
 	LD	(FILE_ENGINE), A
 	POP	HL
 	XOR	A
 	RET
 
+#IFDEF MYM
 RESOLVE_TRY_MYM:
 	POP	HL
 	PUSH	HL
@@ -1340,6 +1347,7 @@ RESOLVE_TRY_MYM:
 	POP	HL
 	XOR	A
 	RET
+#ENDIF
 
 RESOLVE_FAIL_INVALID:
 	POP	HL
@@ -1353,44 +1361,35 @@ RESOLVE_FAIL_NOT_FOUND:
 	LD	A, ERR_FILE_NOT_FOUND
 	RET
 
-; Append ".PT3" at end pointer HL (which must point to trailing NUL).
-APPEND_EXT_PT3:
-	LD	(HL), '.'
+; Append extension string at DE to NUL-terminated buffer at HL.
+APPEND_EXT_STR:
+	LD	A, (DE)
+	OR	A
+	JR	Z, APPEND_EXT_STR0
+	LD	(HL), A
 	INC	HL
-	LD	(HL), 'P'
-	INC	HL
-	LD	(HL), 'T'
-	INC	HL
-	LD	(HL), '3'
-	INC	HL
+	INC	DE
+	JR	APPEND_EXT_STR
+APPEND_EXT_STR0:
 	LD	(HL), 0
 	RET
+
+; Append ".PT3" at end pointer HL (which must point to trailing NUL).
+APPEND_EXT_PT3:
+	LD	DE, MSG_EXT_PT3
+	JP	APPEND_EXT_STR
 
 ; Append ".PT2" at end pointer HL (which must point to trailing NUL).
 APPEND_EXT_PT2:
-	LD	(HL), '.'
-	INC	HL
-	LD	(HL), 'P'
-	INC	HL
-	LD	(HL), 'T'
-	INC	HL
-	LD	(HL), '2'
-	INC	HL
-	LD	(HL), 0
-	RET
+	LD	DE, MSG_EXT_PT2
+	JP	APPEND_EXT_STR
 
+#IFDEF MYM
 ; Append ".MYM" at end pointer HL (which must point to trailing NUL).
 APPEND_EXT_MYM:
-	LD	(HL), '.'
-	INC	HL
-	LD	(HL), 'M'
-	INC	HL
-	LD	(HL), 'Y'
-	INC	HL
-	LD	(HL), 'M'
-	INC	HL
-	LD	(HL), 0
-	RET
+	LD	DE, MSG_EXT_MYM
+	JP	APPEND_EXT_STR
+#ENDIF
 
 ; Probe FCB_WORK existence by open/close.
 ; Returns A=1 if file exists, A=0 if missing.
@@ -1456,13 +1455,16 @@ VALIDATE_FILE_MISSING:
 ; Returns A = ERR_OK or ERR_INVALID_DATA.
 VALIDATE_FORMAT_STRUCTURE:
 	LD	A, (FILE_ENGINE)
+#IFDEF MYM
 	CP	ENGINE_MYM
 	JR	Z, VALIDATE_MYM_STRUCTURE
+#ENDIF
 	CP	ENGINE_PTX
 	JR	Z, VALIDATE_PTX_STRUCTURE
 	LD	A, ERR_INVALID_DATA
 	RET
 
+#IFDEF MYM
 VALIDATE_MYM_STRUCTURE:
 	; First word = frame/row count; reject zero or absurdly large.
 	LD	A, (DMA_BUFFER)
@@ -1474,6 +1476,7 @@ VALIDATE_MYM_STRUCTURE:
 	JP	NC, VALIDATE_FORMAT_INVALID
 	XOR	A
 	RET
+#ENDIF
 
 VALIDATE_PTX_STRUCTURE:
 	CALL	PTX_PRINTABLE_PREFIX
@@ -1507,133 +1510,42 @@ PTX_PRINTABLE_BAD:
 	LD	A, 1
 	RET
 
-PTX_MATCH_VORTEX_HEADER:
-	LD	HL, DMA_BUFFER
-	JR	PTX_MATCH_VORTEX_HL
+PTX_MATCH_SIG:
+	LD	A, (DE)
+	OR	A
+	RET	Z
+	CP	(HL)
+	JR	NZ, PTX_MATCH_SIG_BAD
+	INC	DE
+	INC	HL
+	JR	PTX_MATCH_SIG
 
-PTX_MATCH_VORTEX_MUSIC:
-	LD	HL, MUSIC_BUF
-
-PTX_MATCH_VORTEX_HL:
-	LD	A, (HL)
-	CP	'V'
-	JR	NZ, PTX_VORTEX_BAD
-	INC	HL
-	LD	A, (HL)
-	CP	'o'
-	JR	NZ, PTX_VORTEX_BAD
-	INC	HL
-	LD	A, (HL)
-	CP	'r'
-	JR	NZ, PTX_VORTEX_BAD
-	INC	HL
-	LD	A, (HL)
-	CP	't'
-	JR	NZ, PTX_VORTEX_BAD
-	INC	HL
-	LD	A, (HL)
-	CP	'e'
-	JR	NZ, PTX_VORTEX_BAD
-	INC	HL
-	LD	A, (HL)
-	CP	'x'
-	JR	NZ, PTX_VORTEX_BAD
-	INC	HL
-	LD	A, (HL)
-	CP	' '
-	JR	NZ, PTX_VORTEX_BAD
-	INC	HL
-	LD	A, (HL)
-	CP	'T'
-	JR	NZ, PTX_VORTEX_BAD
-	INC	HL
-	LD	A, (HL)
-	CP	'r'
-	JR	NZ, PTX_VORTEX_BAD
-	INC	HL
-	LD	A, (HL)
-	CP	'a'
-	JR	NZ, PTX_VORTEX_BAD
-	INC	HL
-	LD	A, (HL)
-	CP	'c'
-	JR	NZ, PTX_VORTEX_BAD
-	INC	HL
-	LD	A, (HL)
-	CP	'k'
-	JR	NZ, PTX_VORTEX_BAD
-	INC	HL
-	LD	A, (HL)
-	CP	'e'
-	JR	NZ, PTX_VORTEX_BAD
-	INC	HL
-	LD	A, (HL)
-	CP	'r'
-	JR	NZ, PTX_VORTEX_BAD
-	XOR	A
-	RET
-
-PTX_VORTEX_BAD:
+PTX_MATCH_SIG_BAD:
 	LD	A, 1
 	RET
+
+PTX_SIG_VORTEX:
+	.DB	"Vortex Tracker", 0
+PTX_SIG_PROTRACKER:
+	.DB	"ProTracker ", 0
+
+PTX_MATCH_VORTEX_HEADER:
+	LD	HL, DMA_BUFFER
+	JR	PTX_MATCH_VORTEX_GO
+PTX_MATCH_VORTEX_MUSIC:
+	LD	HL, MUSIC_BUF
+PTX_MATCH_VORTEX_GO:
+	LD	DE, PTX_SIG_VORTEX
+	JP	PTX_MATCH_SIG
 
 PTX_MATCH_PROTRACKER_HEADER:
 	LD	HL, DMA_BUFFER
-	JR	PTX_MATCH_PROTRACKER_HL
-
+	JR	PTX_MATCH_PROTRACKER_GO
 PTX_MATCH_PROTRACKER_MUSIC:
 	LD	HL, MUSIC_BUF
-
-PTX_MATCH_PROTRACKER_HL:
-	LD	A, (HL)
-	CP	'P'
-	JR	NZ, PTX_PROTRACKER_BAD
-	INC	HL
-	LD	A, (HL)
-	CP	'r'
-	JR	NZ, PTX_PROTRACKER_BAD
-	INC	HL
-	LD	A, (HL)
-	CP	'o'
-	JR	NZ, PTX_PROTRACKER_BAD
-	INC	HL
-	LD	A, (HL)
-	CP	'T'
-	JR	NZ, PTX_PROTRACKER_BAD
-	INC	HL
-	LD	A, (HL)
-	CP	'r'
-	JR	NZ, PTX_PROTRACKER_BAD
-	INC	HL
-	LD	A, (HL)
-	CP	'a'
-	JR	NZ, PTX_PROTRACKER_BAD
-	INC	HL
-	LD	A, (HL)
-	CP	'c'
-	JR	NZ, PTX_PROTRACKER_BAD
-	INC	HL
-	LD	A, (HL)
-	CP	'k'
-	JR	NZ, PTX_PROTRACKER_BAD
-	INC	HL
-	LD	A, (HL)
-	CP	'e'
-	JR	NZ, PTX_PROTRACKER_BAD
-	INC	HL
-	LD	A, (HL)
-	CP	'r'
-	JR	NZ, PTX_PROTRACKER_BAD
-	INC	HL
-	LD	A, (HL)
-	CP	' '
-	JR	NZ, PTX_PROTRACKER_BAD
-	XOR	A
-	RET
-
-PTX_PROTRACKER_BAD:
-	LD	A, 1
-	RET
+PTX_MATCH_PROTRACKER_GO:
+	LD	DE, PTX_SIG_PROTRACKER
+	JP	PTX_MATCH_SIG
 
 IS_PRINTABLE_ASCII:
 	CP	32
@@ -1657,29 +1569,22 @@ ENGINE_INIT:
 	LD	A, (FILE_ENGINE)
 	CP	ENGINE_PTX
 	JP	Z, ENGINE_INIT_PTX
+#IFDEF MYM
 	CP	ENGINE_MYM
 	JP	Z, ENGINE_INIT_MYM
+#ENDIF
 	LD	A, ERR_INVALID_DATA
 	RET
 
 ENGINE_INIT_PTX:
 	CALL	PTX_MATCH_VORTEX_MUSIC
 	OR	A
-	JP	Z, ENGINE_INIT_PTX_VORTEX
+	JP	Z, ENGINE_INIT_PTX_BULBA
 	CALL	PTX_MATCH_PROTRACKER_MUSIC
 	OR	A
-	JP	Z, ENGINE_INIT_PTX_PROTRACKER
+	JP	Z, ENGINE_INIT_PTX_BULBA
 	LD	A, ERR_INVALID_DATA
 	RET
-
-ENGINE_INIT_PTX_VORTEX:
-	LD	A, PTX_VARIANT_VORTEX
-	LD	(PTX_VARIANT), A
-	JR	ENGINE_INIT_PTX_BULBA
-
-ENGINE_INIT_PTX_PROTRACKER:
-	LD	A, PTX_VARIANT_PROTRACKER
-	LD	(PTX_VARIANT), A
 
 ENGINE_INIT_PTX_BULBA:
 	; Mute using still-valid TSFLAG/TS_DUALHW from the previous track,
@@ -1691,9 +1596,6 @@ ENGINE_INIT_PTX_BULBA:
 	LD	(TS_DUALHW), A
 	LD	(TS_OFF2), A
 	LD	(TS_OFF2+1), A
-	XOR	A
-	LD	(PTX_STATE_POS), A
-	LD	(PTX_STATE_POS+1), A
 	CALL	BULBA_SYNC_PORTS
 	CALL	PTX_DETECT_TURBOSOUND
 	OR	A
@@ -1721,17 +1623,7 @@ ENGINE_INIT_PTX_SINGLE:
 	XOR	A
 	RET
 
-ENGINE_INIT_MYM:
-	CALL	TS_END_DUAL_SESSION
-	CALL	MYM_INIT
-	CALL	MYM_EXTRACT		; prime depack window A
-	LD	(MYM_NEXT_SRC), IY
-	CALL	MYM_EXTRACT		; prime depack window B
-	LD	(MYM_NEXT_SRC), IY
-	XOR	A
-	RET
-
-; Milestone 3: Scan current drive for .PT2/.PT3/.MYM files.
+; Milestone 3: Scan current drive for .PT2/.PT3 files (and .MYM if -dMYM).
 ; Fills TRACK_LIST with NUL-terminated 8.3 name strings (TRACK_NAME_LEN each).
 ; Sets TRACK_COUNT. Returns A = count.
 ; Ordering follows CP/M directory slot order which is deterministic per disk image.
@@ -1856,13 +1748,21 @@ EXTR_NAME_SKIP:
 	AND	$7F
 	LD	(SCAN_EXT_BUF+2), A
 
-	; Check: PT2
+	; Check: PT2 / PT3
 	LD	A, (SCAN_EXT_BUF)
 	CP	'P'
+#IFDEF MYM
 	JR	NZ, EXTR_TRY_MYM
+#ELSE
+	JR	NZ, EXTR_UNSUPPORTED
+#ENDIF
 	LD	A, (SCAN_EXT_BUF+1)
 	CP	'T'
+#IFDEF MYM
 	JR	NZ, EXTR_TRY_MYM
+#ELSE
+	JR	NZ, EXTR_UNSUPPORTED
+#ENDIF
 	LD	A, (SCAN_EXT_BUF+2)
 	CP	'2'
 	JR	Z, EXTR_EXT_OK
@@ -1870,6 +1770,7 @@ EXTR_NAME_SKIP:
 	JR	Z, EXTR_EXT_OK
 	JR	EXTR_UNSUPPORTED
 
+#IFDEF MYM
 EXTR_TRY_MYM:
 	LD	A, (SCAN_EXT_BUF)
 	CP	'M'
@@ -1880,6 +1781,7 @@ EXTR_TRY_MYM:
 	LD	A, (SCAN_EXT_BUF+2)
 	CP	'M'
 	JR	NZ, EXTR_UNSUPPORTED
+#ENDIF
 
 EXTR_EXT_OK:
 	; Append '.' + 3 ext chars + NUL to DE
@@ -2071,8 +1973,6 @@ PSG_WRITE_REG:
 	POP	BC
 	RET
 
-
-
 ; Write AY register REG with value VAL to optional chip B.
 ; Inputs: B = register number (0-13), C = value.
 ; Clobbers: AF, D, E.
@@ -2204,25 +2104,6 @@ PSG_MUTE_ALL:
 PSG_SILENCE:
 	JP	PSG_MUTE_ALL
 
-; Pause: zero amplitude regs (8-10) + mixer (7=$3F) to ensure 100% note mute.
-PSG_MIXER_OFF:
-	; Zero amplitude channel A (reg 8)
-	LD	B, 8
-	LD	C, 0
-	CALL	PSG_WRITE_ROUTED
-	; Zero amplitude channel B (reg 9)
-	LD	B, 9
-	LD	C, 0
-	CALL	PSG_WRITE_ROUTED
-	; Zero amplitude channel C (reg 10)
-	LD	B, 10
-	LD	C, 0
-	CALL	PSG_WRITE_ROUTED
-	; Mute mixer output (reg 7 = $3F)
-	LD	B, 7
-	LD	C, $3F
-	JP	PSG_WRITE_ROUTED
-
 PSG_MUTE_DIRECT:
 	JP	PSG_MUTE_ALL
 
@@ -2242,8 +2123,10 @@ PLAYBACK_TICK:
 	LD	A, (FILE_ENGINE)
 	CP	ENGINE_PTX
 	JP	Z, PTX_ENGINE_TICK
+#IFDEF MYM
 	CP	ENGINE_MYM
 	JP	Z, MYM_ENGINE_TICK
+#ENDIF
 PLAYBACK_TICK_DONE:
 	POP	HL
 	POP	DE
@@ -2478,7 +2361,6 @@ TS_PORTS_AUTO_MODULE:
 	LD	A, TS_TOPO_MODULE
 	LD	(TS_TOPOLOGY), A
 	LD	A, 1
-	LD	(TS_TOPO_PROMOTED), A
 	LD	(TS_DUALHW), A
 	RET
 
@@ -2572,7 +2454,7 @@ TS_RSEL_TO_DESC:
 	LD	DE, TSSTR_UNKNOWN
 	RET
 TS_DESC_MSX:
-	LD	DE, TSSTR_MSX
+	LD	DE, HW_DESC_MSX
 	RET
 TS_DESC_COLECO:
 	LD	DE, TSSTR_COLECO
@@ -2581,7 +2463,7 @@ TS_DESC_RC:
 	LD	DE, TSSTR_RC
 	RET
 TS_DESC_EB:
-	LD	DE, TSSTR_EB
+	LD	DE, HW_DESC_EB_Z180
 	RET
 
 TS_VERIFY_DUAL_PORTS:
@@ -2731,52 +2613,85 @@ TS_LOAD_TMPL:
 	JP	CTX_LOAD
 
 TS_SAVE_CTX1:
-	LD	HL, TS_CTX1_VARS
-	LD	(CTX_VPTR), HL
-	LD	HL, TS_CTX1_PATCH
-	LD	(CTX_PPTR), HL
+	XOR	A
+	JR	TS_SAVE_CTXN
+TS_SAVE_CTX2:
+	LD	A, 1
+TS_SAVE_CTXN:
+	PUSH	AF
+	CALL	TS_CTXN_RESOLVE
 	CALL	CTX_SAVE
+	POP	AF
+	ADD	A, A
+	LD	HL, TS_CTX_VTNT_TBL
+	LD	E, A
+	LD	D, 0
+	ADD	HL, DE
+	LD	A, (HL)
+	INC	HL
+	LD	H, (HL)
+	LD	L, A
+	PUSH	HL			; TS_CTXn_VTNT
 	LD	HL, VT_ + 16
-	LD	DE, TS_CTX1_VTNT
+	POP	DE
 	LD	BC, TS_VTNT_SIZ
 	LDIR
 	RET
 
 TS_LOAD_CTX1:
-	LD	HL, TS_CTX1_VARS
-	LD	(CTX_VPTR), HL
-	LD	HL, TS_CTX1_PATCH
-	LD	(CTX_PPTR), HL
-	CALL	CTX_LOAD
-	LD	HL, TS_CTX1_VTNT
-	LD	DE, VT_ + 16
-	LD	BC, TS_VTNT_SIZ
-	LDIR
-	RET
-
-TS_SAVE_CTX2:
-	LD	HL, TS_CTX2_VARS
-	LD	(CTX_VPTR), HL
-	LD	HL, TS_CTX2_PATCH
-	LD	(CTX_PPTR), HL
-	CALL	CTX_SAVE
-	LD	HL, VT_ + 16
-	LD	DE, TS_CTX2_VTNT
-	LD	BC, TS_VTNT_SIZ
-	LDIR
-	RET
-
+	XOR	A
+	JR	TS_LOAD_CTXN
 TS_LOAD_CTX2:
-	LD	HL, TS_CTX2_VARS
-	LD	(CTX_VPTR), HL
-	LD	HL, TS_CTX2_PATCH
-	LD	(CTX_PPTR), HL
+	LD	A, 1
+TS_LOAD_CTXN:
+	PUSH	AF
+	CALL	TS_CTXN_RESOLVE
 	CALL	CTX_LOAD
-	LD	HL, TS_CTX2_VTNT
+	POP	AF
+	ADD	A, A
+	LD	HL, TS_CTX_VTNT_TBL
+	LD	E, A
+	LD	D, 0
+	ADD	HL, DE
+	LD	A, (HL)
+	INC	HL
+	LD	H, (HL)
+	LD	L, A
 	LD	DE, VT_ + 16
 	LD	BC, TS_VTNT_SIZ
 	LDIR
 	RET
+
+; In: A = context index (0 or 1). Sets CTX_VPTR and CTX_PPTR.
+TS_CTXN_RESOLVE:
+	ADD	A, A
+	LD	E, A
+	LD	D, 0
+	LD	HL, TS_CTX_VAR_TBL
+	ADD	HL, DE
+	LD	A, (HL)
+	INC	HL
+	LD	H, (HL)
+	LD	L, A
+	LD	(CTX_VPTR), HL
+	LD	HL, TS_CTX_PATCH_TBL
+	ADD	HL, DE
+	LD	A, (HL)
+	INC	HL
+	LD	H, (HL)
+	LD	L, A
+	LD	(CTX_PPTR), HL
+	RET
+
+TS_CTX_VAR_TBL:
+	.DW	TS_CTX1_VARS
+	.DW	TS_CTX2_VARS
+TS_CTX_PATCH_TBL:
+	.DW	TS_CTX1_PATCH
+	.DW	TS_CTX2_PATCH
+TS_CTX_VTNT_TBL:
+	.DW	TS_CTX1_VTNT
+	.DW	TS_CTX2_VTNT
 
 PTX_PATCHTBL:
 	; Per-chip SETUP (bit7=order finished) — required for TurboSound dual so
@@ -2899,260 +2814,9 @@ CTX_LHAVE:
 	ADD	IX, BC
 	JR	CTX_LLP
 
-;-------------------------------------------------------------------------------
-; MYM depacker (MYMPlay 0.4 core by Marq/Lieves!Tuore & Fit, ported from VibeTune-old).
-; Unpacks one 128-frame fragment per MYM_EXTRACT call into a rotating pair of
-; register windows overlaid at MUSIC_BUF; the packed file image sits at
-; MYM_ROWS (2-byte row count, then packed data at MYM_DATA).
-; Bit-reader state lives in the EXX bank between calls (HL' = packed pointer,
-; E'/D' = bit shifter); nothing else in this build touches the EXX bank.
-; MYM_EXTRACT returns IY = play position of the fragment just depacked, and
-; CF=1 while more frames remain (CF=0 at end of tune).
-;-------------------------------------------------------------------------------
-MYM_FRAG	.EQU	128		; fragment size (frames)
-MYM_REGS	.EQU	14		; PSG registers per frame
-MYM_FBITS	.EQU	7		; bits per back-reference offset/length
-
-; Bits per PSG register
-MYM_REGBITS:
-	.DB	8,4,8,4,8,4,5,8,5,5,5,8,8,8
-
-MYM_INIT:
-	EXX				; Starting values for MYM_READBITS
-	LD	E, 1
-	LD	D, 0
-	LD	HL, MYM_DATA
-	EXX
-	LD	HL, MYM_UNCOMP + MYM_FRAG	; Starting play/depack pointers
-	LD	(MYM_DEST1), HL
-	LD	(MYM_DEST2), HL
-	LD	(MYM_PSOURCE), HL
-	LD	A, MYM_FRAG
-	LD	(MYM_PLAYED), A
-	LD	HL, 0
-	LD	(MYM_PROWS), HL
-	RET
-
-MYM_EXTRACT:
-	LD	A, 0
-MYM_REGLOOP:
-	PUSH	AF
-	LD	C, A
-	LD	B, 0
-	LD	HL, MYM_REGBITS
-	ADD	HL, BC
-	LD	D, (HL)		; D = bits in this PSG register
-	LD	HL, MYM_CURRENT
-	ADD	HL, BC
-	LD	E, (HL)		; E = current value of register
-	LD	BC, MYM_FRAG*3
-	LD	HL, (MYM_DEST1)
-	LD	IX, (MYM_DEST1)	; IX = destination 1
-	ADD	HL, BC
-	LD	(MYM_DEST1), HL
-	LD	HL, (MYM_DEST2)	; HL = destination 2
-	PUSH	HL
-	ADD	HL, BC
-	LD	(MYM_DEST2), HL
-	POP	HL
-	EX	AF, AF'		; AF' = fragment end counter
-	LD	A, MYM_FRAG
-	EX	AF, AF'
-	LD	A, 1			; Get fragment bit
-	CALL	MYM_READBITS
-	OR	A
-	JR	NZ, MYM_COMPFRAG	; 1=compressed fragment, 0=unchanged
-
-	LD	B, MYM_FRAG		; Unchanged fragment: just set all to E
-MYM_SWEEP:
-	LD	(HL), E
-	INC	HL
-	LD	(IX+0), E
-	INC	IX
-	DJNZ	MYM_SWEEP
-	JP	MYM_NEXTREG
-
-MYM_COMPFRAG:				; Compressed fragment
-	LD	A, 1
-	CALL	MYM_READBITS
-	OR	A
-	JR	NZ, MYM_NOTPREV		; 0=previous register value, 1=raw/compressed
-
-	LD	(HL), E			; Unchanged register
-	INC	HL
-	LD	(IX+0), E
-	INC	IX
-	EX	AF, AF'
-	DEC	A
-	EX	AF, AF'
-	JP	MYM_NEXTBIT
-
-MYM_NOTPREV:
-	LD	A, 1
-	CALL	MYM_READBITS
-	OR	A
-	JR	Z, MYM_PACKED		; 0=compressed data, 1=raw data
-
-	LD	A, D			; Raw data, read regbits[i] bits
-	CALL	MYM_READBITS
-	LD	E, A
-	LD	(HL), A
-	INC	HL
-	LD	(IX+0), A
-	INC	IX
-	EX	AF, AF'
-	DEC	A
-	EX	AF, AF'
-	JP	MYM_NEXTBIT
-
-MYM_PACKED:
-	LD	A, MYM_FBITS		; Reference to previous data: read the offset
-	CALL	MYM_READBITS
-	LD	C, A
-	LD	A, MYM_FBITS		; Read the number of bytes
-	CALL	MYM_READBITS
-	LD	B, A
-	PUSH	HL
-	PUSH	BC
-	LD	BC, -MYM_FRAG
-	ADD	HL, BC
-	POP	BC
-	LD	A, B
-	LD	B, 0
-	ADD	HL, BC
-	LD	B, A
-	PUSH	HL
-	POP	IY			; IY = source address
-	POP	HL
-	INC	B
-MYM_COPY:
-	LD	A, (IY+0)		; Copy from previous data
-	INC	IY
-	LD	E, A			; Set current value
-	LD	(HL), A
-	INC	HL
-	LD	(IX+0), A
-	INC	IX
-	EX	AF, AF'
-	DEC	A
-	EX	AF, AF'
-	DJNZ	MYM_COPY
-
-MYM_NEXTBIT:
-	EX	AF, AF'		; If AF'=0 then fragment is done
-	LD	C, A
-	EX	AF, AF'
-	LD	A, C
-	OR	A
-	JP	NZ, MYM_COMPFRAG
-
-MYM_NEXTREG:
-	POP	AF
-	LD	B, 0			; Save the current value of PSG reg
-	LD	C, A
-	PUSH	HL
-	LD	HL, MYM_CURRENT
-	ADD	HL, BC
-	LD	(HL), E
-	POP	HL
-	INC	A			; Check if all registers are done
-	CP	MYM_REGS
-	JP	NZ, MYM_REGLOOP
-
-	OR	A			; Check if dest2 must be wrapped
-	LD	BC, MYM_ROWS
-	SBC	HL, BC
-	JR	NZ, MYM_NOWRAP
-
-	LD	IX, MYM_UNCOMP + MYM_FRAG
-	LD	HL, MYM_UNCOMP + MYM_FRAG
-	LD	IY, MYM_UNCOMP + (2*MYM_FRAG)
-	JR	MYM_ENDEXT
-
-MYM_NOWRAP:
-	LD	IX, MYM_UNCOMP
-	LD	HL, MYM_UNCOMP + (2*MYM_FRAG)
-	LD	IY, MYM_UNCOMP + MYM_FRAG
-
-MYM_ENDEXT:
-	LD	(MYM_DEST1), IX
-	LD	(MYM_DEST2), HL
-	LD	BC, MYM_FRAG		; Rows played so far += FRAG
-	LD	HL, (MYM_PROWS)
-	ADD	HL, BC
-	LD	(MYM_PROWS), HL
-	LD	BC, (MYM_ROWS)		; CF=1 while rows > played rows
-	OR	A
-	SBC	HL, BC
-	RET				; CF=0 at end of tune
-
-; Reads A bits from packed stream (EXX bank), returns bits in A
-MYM_READBITS:
-	EXX
-	LD	B, A
-	LD	C, 0
-MYM_ONEBIT:
-	SLA	C			; Get one bit at a time
-	RRC	E
-	JR	NC, MYM_NONEW		; Wrap the AND value
-	LD	D, (HL)
-	INC	HL
-MYM_NONEW:
-	LD	A, E
-	AND	D
-	JR	Z, MYM_ZERO
-	INC	C
-MYM_ZERO:
-	DJNZ	MYM_ONEBIT
-	LD	A, C
-	EXX
-	RET
-
-;-------------------------------------------------------------------------------
-; MYM engine tick. Plays one frame (14 PSG registers) from the depacked
-; windows each call. When a fragment (MYM_FRAG frames) is consumed, swaps to
-; the pre-depacked window and depacks the next one. Stops (silences) at end
-; of tune (MYM_EXTRACT returns CF=0).
-;-------------------------------------------------------------------------------
-MYM_ENGINE_TICK:
-	LD	A, (MYM_PLAYED)
-	OR	A
-	JR	NZ, MYM_TICK_FRAME
-	; Fragment consumed: swap to pre-depacked window, depack the next.
-	LD	HL, (MYM_NEXT_SRC)
-	LD	(MYM_PSOURCE), HL
-	LD	A, MYM_FRAG
-	LD	(MYM_PLAYED), A
-	CALL	MYM_EXTRACT
-	JR	NC, MYM_TICK_STOP
-	LD	(MYM_NEXT_SRC), IY
-MYM_TICK_FRAME:
-	; Gather 14 register bytes (stride 3*FRAG) into MYM_FRAME scratch.
-	LD	HL, (MYM_PSOURCE)
-	LD	DE, MYM_FRAME
-	LD	B, MYM_REGS
-MYM_TICK_GATHER:
-	LD	A, (HL)
-	LD	(DE), A
-	INC	DE
-	LD	BC, 3*MYM_FRAG
-	ADD	HL, BC
-	DJNZ	MYM_TICK_GATHER
-	LD	HL, MYM_FRAME
-	CALL	PSG_ROUT_BLOCK
-	LD	HL, (MYM_PSOURCE)
-	INC	HL
-	LD	(MYM_PSOURCE), HL
-	LD	A, (MYM_PLAYED)
-	DEC	A
-	LD	(MYM_PLAYED), A
-	JP	PLAYBACK_TICK_DONE
-
-MYM_TICK_STOP:
-	CALL	PSG_SILENCE
-	LD	A, PLAY_STOPPED
-	LD	(PLAY_STATE), A
-	JP	PLAYBACK_TICK_DONE
+#IFDEF MYM
+#include "mymeng.inc"
+#ENDIF
 
 ;===============================================================================
 ; Milestone 6: Main playback loop, keystroke dispatch, loop/nav state
@@ -3174,6 +2838,7 @@ MAIN_LOOP:
 	AND	$7F
 	OR	A
 	JP	Z, MAIN_LOOP_NODELAY
+	CALL	TO_UPPER
 
 	; Key dispatch
 	; Delete-arm triple press (DEL or BS) — any other key resets the count.
@@ -3187,8 +2852,6 @@ MAIN_LOOP:
 	POP	AF
 	CP	KEY_QUIT
 	JP	Z, MAIN_QUIT
-	CP	KEY_QUIT_L
-	JP	Z, MAIN_QUIT
 	CP	KEY_QUIT_ESC
 	JP	Z, MAIN_ESC
 	CP	KEY_QUIT_CTRL_C
@@ -3201,11 +2864,7 @@ MAIN_LOOP:
 	JP	Z, MAIN_ENTER_PLAY
 	CP	KEY_NEXT
 	JP	Z, MAIN_NEXT
-	CP	KEY_NEXT_L
-	JP	Z, MAIN_NEXT
 	CP	KEY_PREV
-	JP	Z, MAIN_PREV
-	CP	KEY_PREV_L
 	JP	Z, MAIN_PREV
 	CP	KEY_LOOP
 	JP	Z, MAIN_LOOP_PL_TOGGLE
@@ -3213,23 +2872,13 @@ MAIN_LOOP:
 	JP	Z, MAIN_LOOP_TRK_TOGGLE
 	CP	KEY_REDRAW
 	JP	Z, MAIN_REDRAW_REQ
-	CP	KEY_REDRAW_L
-	JP	Z, MAIN_REDRAW_REQ
 	CP	KEY_NAV_UP
-	JP	Z, MAIN_NAV_UP
-	CP	KEY_NAV_UP_L
 	JP	Z, MAIN_NAV_UP
 	CP	KEY_NAV_LEFT
 	JP	Z, MAIN_NAV_LEFT
-	CP	KEY_NAV_LEFT_L
-	JP	Z, MAIN_NAV_LEFT
 	CP	KEY_NAV_DOWN
 	JP	Z, MAIN_NAV_DOWN
-	CP	KEY_NAV_DOWN_L
-	JP	Z, MAIN_NAV_DOWN
 	CP	KEY_NAV_RIGHT
-	JP	Z, MAIN_NAV_RIGHT
-	CP	KEY_NAV_RIGHT_L
 	JP	Z, MAIN_NAV_RIGHT
 	JP	MAIN_LOOP_NODELAY
 
@@ -3240,6 +2889,13 @@ MAIN_ESC:
 	LD	A, (TRACK_COUNT)
 	OR	A
 	JR	Z, MAIN_ESC_QUIT		; direct-file: bare Esc quits
+	; Mute immediately (probe may block) and re-enable IRQs before BDOS.
+	LD	A, (PLAY_STATE)
+	CP	PLAY_PLAYING
+	JR	NZ, MAIN_ESC_UNBLOCK
+	CALL	START_EXIT_SILENCE
+MAIN_ESC_UNBLOCK:
+	CALL	FORCED_DLY_FRAME_END
 	CALL	UI_ESC_SEQ
 	OR	A
 	JR	Z, MAIN_ESC_QUIT		; bare Esc
@@ -3280,7 +2936,7 @@ MAIN_DELETE_ATTEMPT:
 	JR	Z, MAIN_DEL_PROMPT
 	LD	A, PLAY_PAUSED
 	LD	(PLAY_STATE), A
-	CALL	PAUSE_SILENCE
+	CALL	START_EXIT_SILENCE
 MAIN_DEL_PROMPT:
 	LD	A, (UI_ACTIVE)
 	OR	A
@@ -3375,6 +3031,7 @@ MAIN_DEL_CLAMP_OK:
 	LD	(TRACK_SELECTED), A
 	LD	(TRACK_OLD), A
 	CALL	UI_SHOW_PLAYLIST		; full list redraw (UI only)
+	CALL	UI_SHOW_LOOP_STATUS	; the redraw erased the loop row too
 	JP	MAIN_RELOAD_TRACK
 
 ; Redraw the status row after a cancelled delete prompt.
@@ -3433,6 +3090,7 @@ MAIN_REDRAW_REQ:
 
 MAIN_QUIT:
 	CALL	FORCED_DLY_FRAME_END
+	CALL	START_EXIT_SILENCE
 	CALL	FLUSH_KEYS
 	CALL	UI_EXIT_TO_PROMPT
 	JP	START_EXIT
@@ -3443,11 +3101,12 @@ MAIN_PAUSE_TOGGLE:
 	JR	NZ, MAIN_RESUME
 	LD	A, PLAY_PAUSED
 	LD	(PLAY_STATE), A
-	CALL	PAUSE_SILENCE
+	CALL	START_EXIT_SILENCE
 	LD	A, (UI_ACTIVE)
 	OR	A
 	JR	Z, MAIN_PAUSE_PLAIN
 	CALL	UI_DRAW_STATE_PAUSED
+	CALL	UI_CURSOR_ON_SELECTED
 	JP	MAIN_LOOP_NODELAY
 MAIN_PAUSE_PLAIN:
 	LD	A, STATUS_PAUSED
@@ -3472,28 +3131,33 @@ MAIN_RESUME_PLAY:
 	OR	A
 	JR	Z, MAIN_RESUME_PLAIN
 	CALL	UI_DRAW_STATE_PLAYING
+	CALL	UI_CURSOR_ON_SELECTED
 	JP	MAIN_LOOP_NODELAY
 MAIN_RESUME_PLAIN:
 	LD	A, STATUS_PLAYING
 	LD	(STATUS_MSG_PENDING), A
 	JP	MAIN_LOOP_NODELAY
 
-; Enter: clear pause and play the track under '>'.
+; Enter: resume when paused on the already-loaded track; otherwise load
+; TRACK_SELECTED and play (e.g. paused browse with a pending selection).
 MAIN_ENTER_PLAY:
 	LD	A, (TRACK_COUNT)
 	OR	A
 	JP	Z, MAIN_LOOP_NODELAY	; direct-file mode: ignore
+	LD	A, (PLAY_STATE)
+	CP	PLAY_PAUSED
+	JR	NZ, MAIN_ENTER_PLAY_RELOAD
+	LD	A, (NAV_DEBOUNCE)
+	OR	A
+	JP	NZ, MAIN_ENTER_PLAY_RELOAD
+	JP	MAIN_RESUME_PLAY
+MAIN_ENTER_PLAY_RELOAD:
 	XOR	A
 	LD	(NAV_DEBOUNCE), A
 	LD	A, PLAY_PLAYING
 	LD	(NAV_SAVED_STATE), A
 	LD	(PLAY_STATE), A		; clear pause immediately
 	JP	MAIN_RELOAD_TRACK
-
-; Hard-mute both chips (TS dual / module FF/FE) or the single AY.
-; PSG_MIXER_OFF only hits routed ports and leaves module chip2 sustaining.
-PAUSE_SILENCE:
-	JP	START_EXIT_SILENCE
 
 MAIN_NEXT:
 	LD	A, (TRACK_COUNT)
@@ -3735,18 +3399,19 @@ MAIN_RELOAD_TRACK:
 	OR	A
 	JR	Z, MAIN_RELOAD_SHOW_PLAIN
 	CALL	UI_TRACK_STATUS_UPDATE
-	CALL	UI_UPDATE_MARKER_DELTA
 	LD	A, (NAV_SAVED_STATE)
 	CP	PLAY_PAUSED
 	JR	NZ, MAIN_RELOAD_SET_PLAYING
 	LD	A, PLAY_PAUSED
 	LD	(PLAY_STATE), A
 	CALL	UI_DRAW_STATE_PAUSED
-	JR	MAIN_RELOAD_STATE_OK
+	JR	MAIN_RELOAD_UI_DONE
 MAIN_RELOAD_SET_PLAYING:
 	LD	A, PLAY_PLAYING
 	LD	(PLAY_STATE), A
 	CALL	UI_DRAW_STATE_PLAYING
+MAIN_RELOAD_UI_DONE:
+	CALL	UI_UPDATE_MARKER_DELTA
 	JR	MAIN_RELOAD_STATE_OK
 MAIN_RELOAD_SHOW_PLAIN:
 	LD	A, (NAV_SAVED_STATE)
@@ -3837,24 +3502,12 @@ UPDATE_AUDIO_MODE_FROM_MUSIC:
 	LD	A, (FILE_ENGINE)
 	CP	ENGINE_PTX
 	RET	NZ
-	CALL	PTX_DETECT_TURBOSOUND
+	LD	A, (TSFLAG)
 	OR	A
 	RET	Z
 	LD	A, AUDIO_OUT_TURBOSOUND
 	LD	(AUDIO_OUT_MODE), A
 	RET
-
-; Print detected hardware configuration (shared padded prefix + bare desc).
-PRINT_HARDWARE_CONFIG:
-	CALL	PRINT_HW_DESC_ONLY
-	CALL	CRLF
-	RET
-
-; "Hardware:   <desc>" — regular / non-TS path helper. No CRLF.
-PRINT_HW_DESC_ONLY:
-	LD	DE, MSG_PFX_HW
-	CALL	PRTSTR
-	JP	PRINT_HW_DESC_VALUE
 
 ; Hardware value only (column 13 in ANSI UI). No CRLF.
 PRINT_HW_DESC_VALUE:
@@ -3874,11 +3527,9 @@ PRINT_HW_DESC_HAS:
 ; TS + one real AY:       Hardware:   Single-Card mode <card>
 ; TS + two real AYs:      Hardware:   Dual-Card mode <card1> / <card2>
 PRINT_PLAYBACK_HW_LINE:
-	LD	A, (TSFLAG)
-	OR	A
-	JR	NZ, PRINT_HW_TS
-	JP	PRINT_HW_DESC_ONLY
-
+	LD	DE, MSG_PFX_HW
+	CALL	PRTSTR
+	; fall through — value column shared with ANSI UI
 ; Value column only (no "Hardware:   " prefix).
 PRINT_PLAYBACK_HW_VALUE:
 	LD	A, (TSFLAG)
@@ -3910,54 +3561,7 @@ PRINT_HW_VAL_AVR:
 PRINT_HW_VAL_TS_SINGLE:
 	LD	DE, MSG_HW_SINGLE
 	CALL	PRTSTR
-	LD	HL, (HW_CONFIG_DESC)
-	LD	DE, HW_DESC_UNKNOWN
-	LD	A, H
-	OR	L
-	JR	NZ, PRINT_HW_VAL_TS_SINGLE1
-	EX	DE, HL
-PRINT_HW_VAL_TS_SINGLE1:
-	EX	DE, HL
-	JP	PRTSTR
-
-PRINT_HW_TS:
-	LD	A, (TS_DUALHW)
-	OR	A
-	JR	Z, PRINT_HW_TS_SINGLE
-	LD	A, (TS_TOPOLOGY)
-	CP	TS_TOPO_MODULE
-	JR	Z, PRINT_HW_TS_AVR
-	; Dual-card: two distinct real AYs
-	LD	DE, MSG_PFX_HW
-	CALL	PRTSTR
-	LD	DE, MSG_HW_DUAL
-	CALL	PRTSTR
-	LD	DE, (TS_DESC1)
-	CALL	PRTSTR
-	LD	DE, MSG_HW_SEP
-	CALL	PRTSTR
-	LD	DE, (TS_DESC2)
-	JP	PRTSTR
-
-PRINT_HW_TS_AVR:
-	CALL	PRINT_HW_DESC_ONLY
-	LD	DE, MSG_HW_AVR_TAG
-	JP	PRTSTR
-
-PRINT_HW_TS_SINGLE:
-	LD	DE, MSG_PFX_HW
-	CALL	PRTSTR
-	LD	DE, MSG_HW_SINGLE
-	CALL	PRTSTR
-	LD	HL, (HW_CONFIG_DESC)
-	LD	DE, HW_DESC_UNKNOWN
-	LD	A, H
-	OR	L
-	JR	NZ, PRINT_HW_TS_SINGLE1
-	EX	DE, HL
-PRINT_HW_TS_SINGLE1:
-	EX	DE, HL
-	JP	PRTSTR
+	JP	PRINT_HW_DESC_VALUE
 
 ; Plain-mode wrapper: hardware line + CRLF.
 PRINT_PLAYBACK_HW_CONFIG:
@@ -3992,34 +3596,34 @@ PTX_TS_SCAN_LOOP:
 	JP	NZ, PTX_TS_NEXT
 	LD	A, (IX+2)
 	CP	PT3SIG2
-	JP	NZ, PTX_TS_NEXT
+	JR	NZ, PTX_TS_NEXT
 	LD	A, (IX+3)
 	CP	PT3SIG3
-	JP	NZ, PTX_TS_NEXT
+	JR	NZ, PTX_TS_NEXT
 	LD	A, (IX+6)
 	CP	PT3SIG0
-	JP	NZ, PTX_TS_NEXT
+	JR	NZ, PTX_TS_NEXT
 	LD	A, (IX+7)
 	CP	PT3SIG1
-	JP	NZ, PTX_TS_NEXT
+	JR	NZ, PTX_TS_NEXT
 	LD	A, (IX+8)
 	CP	PT3SIG2
-	JP	NZ, PTX_TS_NEXT
+	JR	NZ, PTX_TS_NEXT
 	LD	A, (IX+9)
 	CP	PT3SIG3
-	JP	NZ, PTX_TS_NEXT
+	JR	NZ, PTX_TS_NEXT
 	LD	A, (IX+12)
 	CP	'0'
-	JP	NZ, PTX_TS_NEXT
+	JR	NZ, PTX_TS_NEXT
 	LD	A, (IX+13)
 	CP	'2'
-	JP	NZ, PTX_TS_NEXT
+	JR	NZ, PTX_TS_NEXT
 	LD	A, (IX+14)
 	CP	'T'
-	JP	NZ, PTX_TS_NEXT
+	JR	NZ, PTX_TS_NEXT
 	LD	A, (IX+15)
 	CP	'S'
-	JP	NZ, PTX_TS_NEXT
+	JR	NZ, PTX_TS_NEXT
 
 	LD	E, (IX+4)
 	LD	D, (IX+5)		; DE = off2
@@ -4028,7 +3632,7 @@ PTX_TS_SCAN_LOOP:
 	ADD	HL, DE			; HL = off2 + len2
 	LD	A, H
 	OR	L
-	JP	Z, PTX_TS_NEXT
+	JR	Z, PTX_TS_NEXT
 	PUSH	HL
 	PUSH	IX
 	POP	BC
@@ -4041,7 +3645,7 @@ PTX_TS_SCAN_LOOP:
 	POP	HL
 	OR	A
 	SBC	HL, DE
-	JP	NZ, PTX_TS_NEXT
+	JR	NZ, PTX_TS_NEXT
 
 	LD	E, (IX+4)
 	LD	D, (IX+5)
@@ -4069,8 +3673,6 @@ DETECT_HARDWARE_CONFIG:
 	CALL	CHECK_HW_CLI_FLAGS
 	OR	A
 	JR	NZ, DETECT_HW_TRY_CFG
-	LD	A, 1
-	LD	(PSG_HW_VALID), A
 	XOR	A
 	RET
 
@@ -4078,8 +3680,6 @@ DETECT_HW_TRY_CFG:
 	CALL	APPLY_CFG_CARD1
 	OR	A
 	JR	NZ, DETECT_HW_TRY_HBIOS
-	LD	A, 1
-	LD	(PSG_HW_VALID), A
 	XOR	A
 	RET
 
@@ -4096,8 +3696,6 @@ DETECT_HW_TRY_PROBE:
 	JR	DETECT_HW_OK
 
 DETECT_HW_OK:
-	LD	A, 1
-	LD	(PSG_HW_VALID), A
 	CALL	SANITIZE_AY_PORTS
 	XOR	A
 	RET
@@ -4107,7 +3705,6 @@ DETECT_HW_FALLBACK:
 	CALL	SET_CONFIG_MSX
 	CALL	APPLY_Z180_FOR_PLATFORM	; MSX ports on Z180 still need DCNTL slow-I/O
 	XOR	A
-	LD	(PSG_HW_VALID), A
 	RET
 
 ; Apply VTUNE.CFG primary card when non-zero. Same IDs as HW_MODE_*.
@@ -4517,7 +4114,7 @@ SANITIZE_AY_PORTS:
 	OR	A
 	RET	Z
 SANITIZE_AY_ABORT:
-	LD	DE, MSG_AY_Z180_COLLIDE
+	LD	DE, MSG_Z180_WARN
 	CALL	PRTSTR
 	CALL	CRLF
 	; Park ports outside the Z180 window so exit mute cannot hit TCR/etc.
@@ -4547,12 +4144,14 @@ LOAD_MUSIC_FILE:
 	CALL	BDOS
 	CP	$FF
 	JR	Z, LOAD_MF_NOT_FOUND
-	; Setup IX = write pointer (MYM loads after the depack windows at MYM_ROWS)
+	; Setup IX = write pointer
 	LD	IX, MUSIC_BUF
+#IFDEF MYM
 	LD	A, (FILE_ENGINE)
 	CP	ENGINE_MYM
 	JR	NZ, LOAD_MF_BLOCK
 	LD	IX, MYM_ROWS
+#ENDIF
 
 LOAD_MF_BLOCK:
 	PUSH	IX
@@ -4591,10 +4190,12 @@ LOAD_MF_EOF:
 	PUSH	IX
 	POP	DE			; DE = current write pointer (next free block)
 	LD	HL, MUSIC_BUF
+#IFDEF MYM
 	LD	A, (FILE_ENGINE)
 	CP	ENGINE_MYM
 	JR	NZ, LOAD_MF_SIZE
 	LD	HL, MYM_ROWS
+#ENDIF
 LOAD_MF_SIZE:
 	LD	A, E
 	SUB	L
@@ -4832,11 +4433,54 @@ CRLF:
 	POP	AF
 	RET
 
+MSG_EXT_PT3:
+	.DB	".PT3", 0
+MSG_EXT_PT2:
+	.DB	".PT2", 0
+#IFDEF MYM
+MSG_EXT_MYM:
+	.DB	".MYM", 0
+#ENDIF
 MSG_BANNER:
 	.DB	"VibeTune Player for RomWBW v", VT_VERSION, ", ", VT_BUILD_DATE, 0
 ; Config file FCB name field: "VTUNE   " + "CFG" (exactly 11 bytes, space-padded)
 MSG_CFG_NAME:
 	.DB	"VTUNE   CFG"
+MSG_CREDITS:
+	.DB	"Copyright (C) 2026, Joao Miguel Duraes (fackie)", 13, 10, 13, 10
+	.DB	"Derivative work from:", 13, 10
+	.DB	"RomWBW tune.com Copyright (C) 2026, Wayne Warthen, GNU GPL v3", 13, 10
+	.DB	"PTxPlayer Copyright (C) 2004-2007, S.V.Bulba", 13, 10
+#IFDEF MYM
+	.DB	"MYMPlay by Marq/Lieves!Tuore"
+#ENDIF
+	.DB	0
+MSG_HELP_TEXT:
+	.DB	13, 10
+	.DB	"  -help     Show this help", 13, 10
+	.DB	"  -credits  Show copyright and attribution", 13, 10
+	.DB	"  -list     Playlist mode: play all PT2/PT3"
+#IFDEF MYM
+	.DB	"/MYM"
+#ENDIF
+	.DB	" on the current drive", 13, 10
+	.DB	"  -loop     Loop playback: playlist in -list mode, single track otherwise", 13, 10
+	.DB	"  -delay    Force delay-loop timing instead of the HBIOS hardware timer", 13, 10
+	.DB	"  -msx      Force MSX standard PSG ports ($A0/$A1)", 13, 10
+	.DB	"  -rc       Force RC2014 standard PSG ports ($D8/$D0)", 13, 10
+	.DB	"  -coleco   Force Coleco PSG ports ($50/$51)", 13, 10
+	.DB	"  -eb       Force Ed Brindley (EB) sound module ports ($68/$60)", 13, 10
+	.DB	"  -tsm      Force TurboSound dual-AVR module mode (0xFF/0xFE); auto if Hi-Z", 13, 10, 13, 10
+	.DB	"Playlist keys: Esc=quit, Space=pause, Enter=play (when paused), N/P=track,", 13, 10
+	.DB	"  WASD/arrows=nav, Delx3=delete, R=redraw, l/L=loop track/playlist", 0
+MSG_Z180_WARN:
+	.DB	"Cannot use these AY ports on this Z180 machine.", 13, 10, 13, 10
+	.DB	"  $D0/$D8 (-rc) overlap the Z180 internal I/O window", 13, 10
+	.DB	"  (RomWBW Z180_IO_BASE, usually $C0 on SC126).", 13, 10, 13, 10
+	.DB	"Reconfigure the sound card, then retry:", 13, 10, 13, 10
+	.DB	"  Rev5:  EB addressing  $60/$68  (vtune -eb)", 13, 10
+	.DB	"  Rev6.1: MSX $A0/$A1 (vtune -msx) or Coleco $50/$51 (-coleco)", 13, 10, 13, 10
+	.DB	"Aborting.", 0
 ; Field prefixes, padded so values align at column 12 (see also ansiui.inc).
 MSG_INPUT:
 	.DB	"Input file: ", 0
@@ -4854,22 +4498,10 @@ MSG_HW_SEP:
 	.DB	" / ", 0
 MSG_HW_AVR_TAG:
 	.DB	" - TurboSound 0xFF/0xFE chip select in use", 0
-MSG_AY_Z180_COLLIDE:
-	.DB	"Cannot use these AY ports on this Z180 machine.", 13, 10
-	.DB	"  $D0/$D8 (-rc) overlap the Z180 internal I/O window", 13, 10
-	.DB	"  (RomWBW Z180_IO_BASE, usually $C0 on SC126).", 13, 10
-	.DB	"Reconfigure the sound card, then retry:", 13, 10
-	.DB	"  Rev5:  EB addressing  $60/$68  (vtune -eb)", 13, 10
-	.DB	"  Rev6.1: MSX $A0/$A1 (vtune -msx) or Coleco $50/$51 (-coleco)", 13, 10
-	.DB	"Aborting.", 0
-TSSTR_MSX:
-	.DB	"MSX standard ($A0H/$A1H)", 0
 TSSTR_COLECO:
 	.DB	"Coleco AY ($50H/$51H)", 0
 TSSTR_RC:
 	.DB	"RC2014 standard ($D8H/$D0H)", 0
-TSSTR_EB:
-	.DB	"RCZ180 EB module ($68H/$60H)", 0
 TSSTR_UNKNOWN:
 	.DB	"Unknown AY port set", 0
 MSG_PLAYING:
@@ -4895,29 +4527,13 @@ MSG_SCANNING:
 MSG_TRACKS_FOUND:
 	.DB	"Tracks found: ", 0
 MSG_USAGE:
-	.DB	"Usage: VTUNE [switches] file[.pt3|.pt2|.mym]", 0
+	.DB	"Usage: VTUNE [switches] file[.pt3|.pt2"
+#IFDEF MYM
+	.DB	"|.mym"
+#ENDIF
+	.DB	"]", 0
 MSG_USAGE_SWITCHES:
 	.DB	"Valid switches: -help -credits -list -loop -delay -msx -rc -coleco -eb -tsm", 0
-MSG_CREDITS:
-	.DB	"Copyright (C) 2026, Joao Miguel Duraes (fackie)", 13, 10, 13, 10
-	.DB	"Derivative work from/by:", 13, 10
-	.DB	"RomWBW tune.com Copyright (C) 2026, Wayne Warthen, GNU GPL v3", 13, 10
-	.DB	"PTxPlayer Copyright (C) 2004-2007, S.V.Bulba", 13, 10
-	.DB	"MYMPlay by Marq/Lieves!Tuore", 0
-MSG_HELP_TEXT:
-	.DB	13, 10
-	.DB	"  -help     Show this help", 13, 10
-	.DB	"  -credits  Show copyright and attribution", 13, 10
-	.DB	"  -list     Playlist mode: play all PT2/PT3/MYM on the current drive", 13, 10
-	.DB	"  -loop     Loop playback: playlist in -list mode, single track otherwise", 13, 10
-	.DB	"  -delay    Force delay-loop timing instead of the HBIOS hardware timer", 13, 10
-	.DB	"  -msx      Force MSX standard PSG ports ($A0/$A1)", 13, 10
-	.DB	"  -rc       Force RC2014 standard PSG ports ($D8/$D0)", 13, 10
-	.DB	"  -coleco   Force Coleco PSG ports ($50/$51)", 13, 10
-	.DB	"  -eb       Force Ed Brindley (EB) sound module ports ($68/$60)", 13, 10
-	.DB	"  -tsm      Force TurboSound dual-AVR module mode (0xFF/0xFE); auto if Hi-Z", 13, 10, 13, 10
-	.DB	"Playlist keys: Esc=quit, Space=pause, Enter=play (when paused), N/P=track,", 13, 10
-	.DB	"  WASD/arrows=nav, Delx3=delete, R=redraw, l/L=loop track/playlist", 0
 MSG_SWITCH_LIST:
 	.DB	"-list", 0
 MSG_SWITCH_MSX:
@@ -4987,8 +4603,6 @@ HEAPENDB:
 	.DB	HEAPEND >> 8		; runtime ceiling page (updated at startup)
 FILE_ENGINE:
 	.DB	ENGINE_NONE
-PTX_VARIANT:
-	.DB	PTX_VARIANT_UNKNOWN
 DISP_MODE:
 	.DB	DISP_PLAIN
 CFG_FLAGS:
@@ -5037,8 +4651,6 @@ PSG_TOUCHED:
 	.DB	0
 EXIT_MSG_ON:
 	.DB	0
-PSG_HW_VALID:
-	.DB	0
 QDLY:
 	.DW	0
 QDLY0:
@@ -5079,10 +4691,6 @@ STATUS_MSG_PENDING:
 	.DB	STATUS_NONE
 MUSIC_SIZE:
 	.DW	0
-PTX_STATE_POS:
-	.DW	0
-HBIOSMD:
-	.DB	0
 TSFLAG:
 	.DB	0
 TS_DUALHW:
@@ -5093,8 +4701,6 @@ TSSET2:
 	.DB	0			; SETUP snapshot after chip-2 quark
 TS_TOPOLOGY:
 	.DB	TS_TOPO_AUTO	; VTUNE.CFG byte 5 / -tsm switch (0=auto, 1=dual-card, 2=module)
-TS_TOPO_PROMOTED:
-	.DB	0			; $FF if TS_PORTS_AUTO_MODULE raised AUTO→MODULE
 TSMOD_CURSEL:
 	.DB	0			; 0=none, $FF/$FE = pending module select for ROUT
 TS_OFF2:
@@ -5110,7 +4716,7 @@ TS_PORT2_RSEL:
 TS_PORT2_RDAT:
 	.DB	0
 TS_DESC1:
-	.DW	TSSTR_MSX
+	.DW	HW_DESC_MSX
 TS_DESC2:
 	.DW	TSSTR_COLECO
 CTX_VPTR:
@@ -5167,6 +4773,7 @@ DELCNT:
 	.DS	1			; consecutive DEL/BS presses (delete arm)
 DEL_STATE:
 	.DS	1			; saved PLAY_STATE during delete prompt
+#IFDEF MYM
 ; MYM engine state (re-initialized by ENGINE_INIT_MYM on every track load)
 MYM_PLAYED:
 	.DS	1			; frames left in current fragment
@@ -5184,6 +4791,7 @@ MYM_CURRENT:
 	.DS	14			; current values of PSG registers
 MYM_FRAME:
 	.DS	14			; per-tick register gather scratch
+#ENDIF
 METATITLE:
 	.DS	32
 METAARTIST:
@@ -5239,10 +4847,12 @@ TS_CTX2_VTNT:
 
 MUSIC_BUF:
 
+#IFDEF MYM
 ; MYM depack layout (overlaid at MUSIC_BUF): 3*FRAG*REGS bytes of rotating
 ; register windows, then the packed file image (row-count word + packed data).
 MYM_UNCOMP	.EQU	MUSIC_BUF	; depack windows (3*FRAG*REGS bytes)
 MYM_ROWS	.EQU	MYM_UNCOMP + (3*MYM_FRAG*MYM_REGS)
 MYM_DATA	.EQU	MYM_ROWS + 2
+#ENDIF
 
 	.END	START

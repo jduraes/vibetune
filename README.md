@@ -3,18 +3,19 @@
 [2026-08-26]
 
 A music player for RomWBW CP/M on real Z80-family hardware. `vtune.com` plays
-PT2, PT3 and MYM sound files on AY-3-8910 / YM2149-class sound chips, with a
+PT2 and PT3 sound files on AY-3-8910 / YM2149-class sound chips, with a
 terminal-aware playlist UI and dual-chip TurboSound support (two real cards or
-a dual-AVR module). `vtunecfg.com` configures display, AY cards, and TurboSound
+a dual-AVR module). Optional MYM support is available via `Build.cmd MYM`
+(`mymeng.inc`). `vtunecfg.com` configures display, AY cards, and TurboSound
 topology.
 
 Current release: **v0.0.228**.
 
 ## Features
 
-- **Formats:** PT2, PT3 (including Vortex Tracker II variants) and MYM,
-  detected from the file extension. PT3 metadata (title/author) shown while
-  playing.
+- **Formats:** PT2, PT3 (including Vortex Tracker II variants); MYM when built
+  with `-dMYM`. Detected from the file extension. PT3 metadata (title/author)
+  shown while playing.
 - **Playlist mode (`-list`):** scans the current drive/user area for up to
   128 tracks, navigable while playing, with loop-track and loop-playlist
   modes (`-loop`), pause/resume, Enter to play the selection, next/previous,
