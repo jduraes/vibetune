@@ -1090,58 +1090,167 @@ UI_NAV_RIGHT_WRAP:
 	SUB	B			; row start
 	RET
 
-; Wait up to B polls for a console byte. Returns char in A, 0 if timeout.
-; Uses BDOS CONST (11) so we never block inside UI_ESC_SEQ.
+; Non-blocking console peek. Returns char in A, 0 if none ready.
+; BDOS fn 6 only — do not mix with CONST (fn 11). CP/M 2.2 CONST can
+; steal a byte into the 1-char kbchar lookahead that fn 6 never sees
+; (first arrow dropped, leftover '[' at the CCP). CP/M 3 / ZPM3 / ZDOS
+; share a buffer so the old mix happened to work there.
+UI_ESC_GETCH_NB:
+	LD	C, $06
+	LD	E, $FF
+	CALL	BDOS
+	AND	$7F
+	RET
+
+; Wait briefly for a console byte. Returns char in A, 0 if timeout.
+; Same fn-6-only poll as the main loop (counted spin; never blocks).
+; Keep this SHORT: bare Esc used to burn a full vtunecfg-sized 8000-spin
+; (~seconds) before quit. Cross-frame CONTINUE picks up late '[' /
+; letter on the next frame instead.
 UI_ESC_GETCH:
 	PUSH	BC
+	LD	BC, 400			; ~same-frame CSI at 9600+; not a long block
 UI_ESC_GETCH1:
 	PUSH	BC
-	LD	C, $0B
-	CALL	BDOS
-	OR	A
-	JR	Z, UI_ESC_GETCH2
 	LD	C, $06
 	LD	E, $FF
 	CALL	BDOS
 	POP	BC
+	OR	A
+	JR	Z, UI_ESC_GETCH2
 	POP	BC
 	AND	$7F
 	RET
 UI_ESC_GETCH2:
-	POP	BC
-	DJNZ	UI_ESC_GETCH1
+	DEC	BC
+	LD	A, B
+	OR	C
+	JR	NZ, UI_ESC_GETCH1
 	POP	BC
 	XOR	A
 	RET
 
-; Called after Esc in UI mode: give an escape sequence a short window to
-; arrive (arrow keys = ESC [ A/B/C/D or ESC O A/B/C/D; keypad Enter = ESC O M).
-; Returns A=0 bare Esc (quit), A=1 sequence consumed, A=2 delete, A=3 Enter.
-; On an arrow key, UI_IDXTMP holds the new index (<> $FF).
-UI_ESC_SEQ:
+; Clear CSI state and return A=1 (sequence consumed / swallowed).
+UI_ESC_DONE1:
+	XOR	A
+	LD	(ESC_CSI_STATE), A
+	LD	A, 1
+	RET
+
+; Clear CSI state and return A=0 (bare Esc → quit).
+UI_ESC_DONE0:
+	XOR	A
+	LD	(ESC_CSI_STATE), A
+	RET
+
+; Same-frame try after Esc: short spin for introducer + final. Leaves
+; ESC_CSI_STATE pending ($FF) if the tail has not arrived — next frame
+; UI_ESC_CONTINUE finishes it (or bare-Esc quits). Do NOT use a long spin
+; here or Esc-to-quit feels multi-second.
+; Returns: 0=quit, 1=done, 2=del, 3=enter, $FF=pending.
+; Hold-arrow race: if the next sequence's Esc is read as this CSI's final,
+; UI_ESC_FIN_* rearms into UI_ESC_TRY_BODY so we do not leave orphan '['+'A'
+; for the WASD handler (bare 'A' = left).
+UI_ESC_TRY:
 	LD	A, $FF
 	LD	(UI_IDXTMP), A
-	LD	B, $40			; spin count waiting for the introducer
+	LD	A, ESC_ST_ESC
+	LD	(ESC_CSI_STATE), A
+UI_ESC_TRY_BODY:
 	CALL	UI_ESC_GETCH
 	OR	A
-	JR	Z, UI_ESC_SEQ0		; bare Esc
+	JR	Z, UI_ESC_PENDING
 	CP	'['
-	JR	Z, UI_ESC_SEQ_CSI
+	JR	Z, UI_ESC_TRY_CSI
 	CP	'O'
-	JR	Z, UI_ESC_SEQ_SS3
-	LD	A, 1			; unknown sequence — swallow
+	JR	Z, UI_ESC_TRY_SS3
+	CP	27
+	JR	Z, UI_ESC_DONE0		; Esc Esc → quit
+	JP	UI_ESC_DONE1		; unknown after Esc — swallow
+UI_ESC_TRY_CSI:
+	LD	A, ESC_ST_CSI
+	LD	(ESC_CSI_STATE), A
+	CALL	UI_ESC_GETCH
+	OR	A
+	JR	Z, UI_ESC_PENDING
+	JP	UI_ESC_FIN_CSI
+UI_ESC_TRY_SS3:
+	LD	A, ESC_ST_SS3
+	LD	(ESC_CSI_STATE), A
+	CALL	UI_ESC_GETCH
+	OR	A
+	JR	Z, UI_ESC_PENDING
+	JP	UI_ESC_FIN_SS3
+UI_ESC_PENDING:
+	LD	A, $FF
 	RET
-UI_ESC_SEQ0:
+
+; Cross-frame continue: non-blocking only. Bare Esc quit if still ESC_ST_ESC
+; with no follower this frame. Second Esc also quits.
+UI_ESC_CONTINUE:
+	LD	A, $FF
+	LD	(UI_IDXTMP), A
+	LD	A, (ESC_CSI_STATE)
+	CP	ESC_ST_ESC
+	JR	Z, UI_ESC_CONT_ESC
+	CP	ESC_ST_CSI
+	JR	Z, UI_ESC_CONT_CSI
+	CP	ESC_ST_SS3
+	JR	Z, UI_ESC_CONT_SS3
+	CP	ESC_ST_DEL
+	JR	Z, UI_ESC_CONT_DEL
+	JP	UI_ESC_DONE1
+
+UI_ESC_CONT_ESC:
+	CALL	UI_ESC_GETCH_NB
+	OR	A
+	JR	Z, UI_ESC_DONE0		; no follower next frame → bare Esc
+	CP	27
+	JR	Z, UI_ESC_DONE0		; Esc Esc → quit
+	CP	'['
+	JR	Z, UI_ESC_CONT_GOT_CSI
+	CP	'O'
+	JR	Z, UI_ESC_CONT_GOT_SS3
+	JP	UI_ESC_DONE1
+UI_ESC_CONT_GOT_CSI:
+	LD	A, ESC_ST_CSI
+	LD	(ESC_CSI_STATE), A
+	; fall through — try final immediately if already buffered
+UI_ESC_CONT_CSI:
+	CALL	UI_ESC_GETCH_NB
+	OR	A
+	JP	Z, UI_ESC_PENDING
+	JP	UI_ESC_FIN_CSI
+UI_ESC_CONT_GOT_SS3:
+	LD	A, ESC_ST_SS3
+	LD	(ESC_CSI_STATE), A
+UI_ESC_CONT_SS3:
+	CALL	UI_ESC_GETCH_NB
+	OR	A
+	JP	Z, UI_ESC_PENDING
+	JP	UI_ESC_FIN_SS3
+UI_ESC_CONT_DEL:
+	CALL	UI_ESC_GETCH_NB
+	OR	A
+	JP	Z, UI_ESC_PENDING
+	CP	'~'
+	JP	NZ, UI_ESC_DONE1
 	XOR	A
+	LD	(ESC_CSI_STATE), A
+	LD	A, 2
 	RET
 
-UI_ESC_SEQ_CSI:
-	LD	B, $40
-	CALL	UI_ESC_GETCH
-	OR	A
-	JR	Z, UI_ESC_SEQ1		; incomplete — swallow
+; A = CSI final byte (after Esc [).
+; If the final is Esc, the next auto-repeat sequence overlapped — re-arm
+; and assemble that sequence instead of swallowing (which left '[' then
+; bare 'A'/'B'/'C'/'D' for WASD: hold-Up became Left).
+UI_ESC_FIN_CSI:
+	CP	27
+	JR	Z, UI_ESC_FIN_REARM
+	CP	'['
+	JP	Z, UI_ESC_TRY_CSI	; stray '[' — still waiting for final
 	CP	'3'
-	JR	Z, UI_ESC_DEL_TILDE
+	JR	Z, UI_ESC_FIN_DEL
 	CP	'A'
 	JR	Z, UI_ESC_UP
 	CP	'B'
@@ -1150,16 +1259,32 @@ UI_ESC_SEQ_CSI:
 	JR	Z, UI_ESC_RIGHT
 	CP	'D'
 	JR	Z, UI_ESC_LEFT
-	LD	A, 1
-	RET
-
-UI_ESC_SEQ_SS3:
-	LD	B, $40
-	CALL	UI_ESC_GETCH
+	JP	UI_ESC_DONE1
+UI_ESC_FIN_REARM:
+	LD	A, $FF
+	LD	(UI_IDXTMP), A
+	LD	A, ESC_ST_ESC
+	LD	(ESC_CSI_STATE), A
+	JP	UI_ESC_TRY_BODY
+UI_ESC_FIN_DEL:
+	LD	A, ESC_ST_DEL
+	LD	(ESC_CSI_STATE), A
+	CALL	UI_ESC_GETCH		; spin: ~ usually follows 3 immediately
 	OR	A
-	JR	Z, UI_ESC_SEQ1
+	JP	Z, UI_ESC_PENDING
+	CP	'~'
+	JP	NZ, UI_ESC_DONE1
+	XOR	A
+	LD	(ESC_CSI_STATE), A
+	LD	A, 2
+	RET
+
+; A = SS3 final byte (after Esc O).
+UI_ESC_FIN_SS3:
+	CP	27
+	JR	Z, UI_ESC_FIN_REARM
 	CP	'M'
-	JR	Z, UI_ESC_ENTER		; keypad Enter
+	JR	Z, UI_ESC_ENTER
 	CP	'A'
 	JR	Z, UI_ESC_UP
 	CP	'B'
@@ -1168,23 +1293,12 @@ UI_ESC_SEQ_SS3:
 	JR	Z, UI_ESC_RIGHT
 	CP	'D'
 	JR	Z, UI_ESC_LEFT
-	LD	A, 1
-	RET
-
-UI_ESC_SEQ1:
-	LD	A, 1
-	RET
+	JP	UI_ESC_DONE1
 
 UI_ESC_ENTER:
+	XOR	A
+	LD	(ESC_CSI_STATE), A
 	LD	A, 3
-	RET
-UI_ESC_DEL_TILDE:
-	; ESC [ 3 ~ = DEL key: consume the trailing '~', report A=2
-	LD	B, $40
-	CALL	UI_ESC_GETCH
-	OR	A
-	JR	Z, UI_ESC_SEQ1
-	LD	A, 2
 	RET
 UI_ESC_UP:
 	CALL	UI_NAV_UP
@@ -1199,6 +1313,12 @@ UI_ESC_LEFT:
 	CALL	UI_NAV_LEFT
 UI_ESC_NAV_DONE:
 	LD	(UI_IDXTMP), A
+	LD	A, $FF
+	LD	(CSI_ARROW_STICKY), A
+	LD	A, CSI_STICKY_TTL_LEN
+	LD	(CSI_STICKY_TTL), A
+	XOR	A
+	LD	(ESC_CSI_STATE), A
 	LD	A, 1
 	RET
 

@@ -81,7 +81,8 @@ Valid switches: -help -credits -list -loop -delay -msx -rc -coleco -eb -tsm
 ```
 
 Playlist keys: `Esc` quit, `Space` pause, `Enter` play selection (clears
-pause), `N`/`P` next/previous track, `WASD`/arrow keys navigate, `R` redraw,
+pause), `N`/`P` next/previous track, `WASD`/arrow keys navigate, `R` redraw
+(mute + full UI refresh of the already-loaded track; no disk I/O),
 `l`/`L` loop track/playlist, `DEL` ×3 delete selected file.
 
 ```

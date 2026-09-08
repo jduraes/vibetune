@@ -125,8 +125,22 @@
 #DEFINE KEY_NAV_DOWN_L 's'
 #DEFINE KEY_NAV_RIGHT 'D'
 #DEFINE KEY_NAV_RIGHT_L 'd'
-; Paused-browse debounce: frames (~20 ms each) to wait after the last nav
-; move before reloading the selected track (~1.75 s at 88).
+
+; Cross-frame CSI assembler states (ESC_CSI_STATE)
+#DEFINE ESC_ST_IDLE 0
+#DEFINE ESC_ST_ESC  1			; saw Esc, waiting for [ or O
+#DEFINE ESC_ST_CSI  2			; saw Esc [, waiting final
+#DEFINE ESC_ST_SS3  3			; saw Esc O, waiting final
+#DEFINE ESC_ST_DEL  4			; saw Esc [ 3, waiting ~
+
+; After a CSI arrow, some terminals auto-repeat with only the final letter
+; (bare 'A') instead of full ESC [ A. Bare 'A' is also WASD-left — sticky
+; treats A/B/C/D as CSI finals until idle TTL expires or another key arrives.
+#DEFINE CSI_STICKY_TTL_LEN 60		; ~1.2 s idle clear (~20 ms/frame)
+
+; Paused/playing browse debounce: frames (~20 ms each) after the last nav
+; move before reloading (~1.75 s at 88). Hold-arrow/WASD only moves the
+; marker; disk reload waits until the key has been released and settled.
 #DEFINE NAV_DEBOUNCE_LEN 88
 ; Quark delay removed — use timing.inc WAITQ (CPU-calibrated ~20 ms/quark).
 
@@ -429,6 +443,9 @@ START_EXIT_MSG:
 	CALL	PRTSTR
 	CALL	CRLF
 START_EXIT_DONE:
+	; Drop keys that arrived during "Done..." / ANSI teardown (fn 6
+	; only — same path as input; never CONST, which fills kbchar).
+	CALL	FLUSH_KEYS
 	; Return to CP/M via BDOS system reset (function 0).
 	LD	C, 0
 	JP	BDOS
@@ -2827,20 +2844,41 @@ CTX_LHAVE:
 ; Exits when PLAY_STOPPED and no restart needed, or on quit.
 MAIN_LOOP:
 	CALL	FORCED_DLY_FRAME_BEGIN
+
+	; Cross-frame CSI pending: do not tick (would re-sound a muted note).
+	LD	A, (ESC_CSI_STATE)
+	OR	A
+	JP	NZ, MAIN_ESC_CONTINUE
+
 	CALL	PLAYBACK_TICK
 
+	; Hold-arrow drain may have consumed a non-nav byte; dispatch it
+	; before polling BDOS (already 7-bit and uppercased).
+	LD	A, (PENDING_KEY)
+	OR	A
+	JR	Z, MAIN_POLL_BDOS
+	PUSH	AF
+	XOR	A
+	LD	(PENDING_KEY), A
+	POP	AF
+	JR	MAIN_KEY_GOT
+MAIN_POLL_BDOS:
 	; Non-blocking key poll (same as tune.com: BDOS 06h direct, E=FF).
 	LD	C, $06
 	LD	E, $FF
 	CALL	BDOS
 	OR	A
-	JP	Z, MAIN_LOOP_NODELAY
+	JP	Z, MAIN_LOOP_NOKEY
 	AND	$7F
 	OR	A
-	JP	Z, MAIN_LOOP_NODELAY
+	JP	Z, MAIN_LOOP_NOKEY
 	CALL	TO_UPPER
+MAIN_KEY_GOT:
 
 	; Key dispatch
+	; Orphan CSI '[' (Esc lost to hold-arrow overlap) — assemble final.
+	CP	'['
+	JP	Z, MAIN_ESC_ORPHAN_CSI
 	; Delete-arm triple press (DEL or BS) — any other key resets the count.
 	CP	$7F
 	JP	Z, MAIN_DEL_PRESS
@@ -2872,6 +2910,27 @@ MAIN_LOOP:
 	JP	Z, MAIN_LOOP_TRK_TOGGLE
 	CP	KEY_REDRAW
 	JP	Z, MAIN_REDRAW_REQ
+	; CSI auto-repeat sticky: bare A/B/C/D mean arrows, not WASD.
+	LD	C, A
+	LD	A, (CSI_ARROW_STICKY)
+	OR	A
+	LD	A, C
+	JR	Z, MAIN_KEY_WASD
+	CP	'A'
+	JP	Z, MAIN_CSI_STICKY_UP
+	CP	'B'
+	JP	Z, MAIN_CSI_STICKY_DOWN
+	CP	'C'
+	JP	Z, MAIN_CSI_STICKY_RIGHT
+	CP	'D'
+	JP	Z, MAIN_CSI_STICKY_LEFT
+	; Other key ends sticky (WASD W/S, letters, etc.).
+	PUSH	AF
+	XOR	A
+	LD	(CSI_ARROW_STICKY), A
+	LD	(CSI_STICKY_TTL), A
+	POP	AF
+MAIN_KEY_WASD:
 	CP	KEY_NAV_UP
 	JP	Z, MAIN_NAV_UP
 	CP	KEY_NAV_LEFT
@@ -2882,21 +2941,89 @@ MAIN_LOOP:
 	JP	Z, MAIN_NAV_RIGHT
 	JP	MAIN_LOOP_NODELAY
 
+; No console byte: decay CSI sticky TTL so WASD A/D work after arrow hold.
+MAIN_LOOP_NOKEY:
+	LD	A, (CSI_ARROW_STICKY)
+	OR	A
+	JP	Z, MAIN_LOOP_NODELAY
+	LD	A, (CSI_STICKY_TTL)
+	OR	A
+	JR	Z, MAIN_LOOP_CLR_STICKY
+	DEC	A
+	LD	(CSI_STICKY_TTL), A
+	JP	NZ, MAIN_LOOP_NODELAY
+MAIN_LOOP_CLR_STICKY:
+	XOR	A
+	LD	(CSI_ARROW_STICKY), A
+	JP	MAIN_LOOP_NODELAY
+
 ; Esc may start an arrow-key CSI (ESC [ A/B/C/D). In playlist mode always
 ; probe the sequence before quitting — plain -list used to treat Esc as
 ; immediate quit, so arrow keys never navigated (help text promised they do).
+; Mute immediately when playing so the current note does not sustain through
+; CSI wait / reload; skip PLAYBACK_TICK while ESC_CSI_STATE is pending.
 MAIN_ESC:
 	LD	A, (TRACK_COUNT)
 	OR	A
-	JR	Z, MAIN_ESC_QUIT		; direct-file: bare Esc quits
-	; Mute immediately (probe may block) and re-enable IRQs before BDOS.
+	JP	Z, MAIN_ESC_QUIT		; direct-file: bare Esc quits
+	CALL	FORCED_DLY_FRAME_END	; EI before BDOS CSI probes
 	LD	A, (PLAY_STATE)
 	CP	PLAY_PLAYING
-	JR	NZ, MAIN_ESC_UNBLOCK
+	JR	NZ, MAIN_ESC_ARM
 	CALL	START_EXIT_SILENCE
-MAIN_ESC_UNBLOCK:
+MAIN_ESC_ARM:
+	LD	A, ESC_ST_ESC
+	LD	(ESC_CSI_STATE), A
+	CALL	UI_ESC_TRY		; same-frame spin for [ / letter
+	JR	MAIN_ESC_DISPATCH
+
+; Bare '[' in the key poll: Esc was dropped (hold-arrow desync). Treat as
+; CSI introducer and spin for the final so 'A' is Up, not WASD Left.
+MAIN_ESC_ORPHAN_CSI:
+	LD	A, (TRACK_COUNT)
+	OR	A
+	JP	Z, MAIN_LOOP_NODELAY
 	CALL	FORCED_DLY_FRAME_END
-	CALL	UI_ESC_SEQ
+	LD	A, $FF
+	LD	(UI_IDXTMP), A
+	LD	A, ESC_ST_CSI
+	LD	(ESC_CSI_STATE), A
+	CALL	UI_ESC_GETCH
+	OR	A
+	JR	NZ, MAIN_ESC_ORPHAN_FIN
+	LD	A, $FF
+	JR	MAIN_ESC_DISPATCH
+MAIN_ESC_ORPHAN_FIN:
+	CALL	UI_ESC_FIN_CSI
+	JR	MAIN_ESC_DISPATCH
+
+; Refresh CSI sticky + TTL (hold-repeat may send only the final letter).
+MAIN_CSI_STICKY_TOUCH:
+	LD	A, $FF
+	LD	(CSI_ARROW_STICKY), A
+	LD	A, CSI_STICKY_TTL_LEN
+	LD	(CSI_STICKY_TTL), A
+	RET
+MAIN_CSI_STICKY_UP:
+	CALL	MAIN_CSI_STICKY_TOUCH
+	JP	MAIN_NAV_UP
+MAIN_CSI_STICKY_DOWN:
+	CALL	MAIN_CSI_STICKY_TOUCH
+	JP	MAIN_NAV_DOWN
+MAIN_CSI_STICKY_RIGHT:
+	CALL	MAIN_CSI_STICKY_TOUCH
+	JP	MAIN_NAV_RIGHT
+MAIN_CSI_STICKY_LEFT:
+	CALL	MAIN_CSI_STICKY_TOUCH
+	JP	MAIN_NAV_LEFT
+
+; Pending CSI from a prior frame (Esc arrived; follower still in flight).
+MAIN_ESC_CONTINUE:
+	CALL	FORCED_DLY_FRAME_END
+	CALL	UI_ESC_CONTINUE		; non-blocking; may complete or quit
+MAIN_ESC_DISPATCH:
+	CP	$FF
+	JP	Z, MAIN_LOOP_NODELAY	; still waiting for CSI tail
 	OR	A
 	JR	Z, MAIN_ESC_QUIT		; bare Esc
 	CP	2
@@ -2908,6 +3035,8 @@ MAIN_ESC_UNBLOCK:
 	JP	NZ, MAIN_NAV_GO		; arrow key -> move
 	JP	MAIN_LOOP_NODELAY	; other sequence — swallowed
 MAIN_ESC_QUIT:
+	XOR	A
+	LD	(ESC_CSI_STATE), A
 	JP	MAIN_QUIT
 
 ; Triple-DEL arms deletion of the selected track (playlist mode only).
@@ -3072,24 +3201,52 @@ MAIN_NAV_GO:
 	LD	A, (TRACK_COUNT)
 	OR	A
 	JP	Z, MAIN_LOOP_NODELAY
-	LD	A, (PLAY_STATE)	; preserve pause across the switch
-	LD	(NAV_SAVED_STATE), A
+	CALL	NAV_SAVE_IF_IDLE
 	LD	A, (TRACK_SELECTED)
 	LD	(TRACK_OLD), A
 	LD	A, (UI_IDXTMP)
 	LD	(TRACK_SELECTED), A
 	JP	MAIN_NAV_RELOAD_OR_DEFER
 
+; R: mute, full UI redraw from already-loaded track state, resume.
+; No disk I/O — must not call MAIN_RELOAD_TRACK (directory seek + file read
+; scale with slot/size; late list entries felt like multi-second "redraw").
 MAIN_REDRAW_REQ:
+	LD	A, (PLAY_STATE)
+	LD	(NAV_SAVED_STATE), A	; preserve play/pause across paint
+	CP	PLAY_PLAYING
+	JR	NZ, MAIN_REDRAW_STOP
+	CALL	START_EXIT_SILENCE
+MAIN_REDRAW_STOP:
+	XOR	A
+	LD	(PLAY_STATE), A		; no ticks during paint
 	LD	A, (UI_ACTIVE)
 	OR	A
-	JP	Z, MAIN_LOOP_NODELAY
-	LD	A, STATUS_REDRAW
-	LD	(STATUS_MSG_PENDING), A
-	JP	MAIN_LOOP_NODELAY
+	JR	Z, MAIN_REDRAW_RESUME
+	LD	A, (NAV_SAVED_STATE)
+	CP	PLAY_PAUSED
+	JR	NZ, MAIN_REDRAW_PAINT
+	LD	(PLAY_STATE), A		; paused footer only; still not PLAYING
+MAIN_REDRAW_PAINT:
+	CALL	UI_FULL_REDRAW
+	CALL	START_EXIT_SILENCE	; keep PSG dead through long ANSI
+MAIN_REDRAW_RESUME:
+	LD	A, (NAV_SAVED_STATE)
+	CP	PLAY_PAUSED
+	JR	Z, MAIN_REDRAW_PAUSED
+	LD	A, PLAY_PLAYING
+	LD	(PLAY_STATE), A
+	LD	(NAV_SAVED_STATE), A
+	JP	MAIN_LOOP
+MAIN_REDRAW_PAUSED:
+	LD	A, PLAY_PAUSED
+	LD	(PLAY_STATE), A
+	JP	MAIN_LOOP
 
 MAIN_QUIT:
 	CALL	FORCED_DLY_FRAME_END
+	XOR	A
+	LD	(ESC_CSI_STATE), A
 	CALL	START_EXIT_SILENCE
 	CALL	FLUSH_KEYS
 	CALL	UI_EXIT_TO_PROMPT
@@ -3162,9 +3319,8 @@ MAIN_ENTER_PLAY_RELOAD:
 MAIN_NEXT:
 	LD	A, (TRACK_COUNT)
 	OR	A
-	JR	Z, MAIN_LOOP_NODELAY
-	LD	A, (PLAY_STATE)	; preserve pause across the switch
-	LD	(NAV_SAVED_STATE), A
+	JP	Z, MAIN_LOOP_NODELAY
+	CALL	NAV_SAVE_IF_IDLE	; don't clobber PLAY_PLAYING mid-settle
 	LD	A, (TRACK_SELECTED)
 	LD	(TRACK_OLD), A
 	INC	A
@@ -3179,9 +3335,8 @@ MAIN_NEXT_OK:
 MAIN_PREV:
 	LD	A, (TRACK_COUNT)
 	OR	A
-	JR	Z, MAIN_LOOP_NODELAY
-	LD	A, (PLAY_STATE)	; preserve pause across the switch
-	LD	(NAV_SAVED_STATE), A
+	JP	Z, MAIN_LOOP_NODELAY
+	CALL	NAV_SAVE_IF_IDLE	; don't clobber PLAY_PLAYING mid-settle
 	LD	A, (TRACK_SELECTED)
 	LD	(TRACK_OLD), A
 	OR	A
@@ -3195,17 +3350,177 @@ MAIN_PREV_OK:
 	LD	(TRACK_SELECTED), A
 	JP	MAIN_NAV_RELOAD_OR_DEFER
 
-; Track selected by a manual nav key. Playing: reload immediately. Paused:
-; move the marker only and debounce the reload ~1s (NAV_DEBOUNCE frames) so
-; rapid browsing doesn't read/parse/draw every intermediate track.
+; Snapshot PLAY_STATE → NAV_SAVED_STATE only when not already settling.
+; Repeat N/P (or second arrow) while PLAY_PAUSED mid-browse must not
+; overwrite a prior PLAY_PLAYING intent.
+NAV_SAVE_IF_IDLE:
+	LD	A, (NAV_DEBOUNCE)
+	OR	A
+	RET	NZ
+	LD	A, (PLAY_STATE)
+	LD	(NAV_SAVED_STATE), A
+	RET
+
+; Track selected by a manual nav key (arrows / WASD / N/P).
+; Hold only moves the marker; reload after key-release settle (NAV_DEBOUNCE).
+; Playing: mute and enter PLAY_PAUSED so browse matches pause mode exactly
+; (PLAY_STOPPED=0 would falsely trigger end-of-track advance each frame).
 MAIN_NAV_RELOAD_OR_DEFER:
 	LD	A, (PLAY_STATE)
-	CP	PLAY_PAUSED
-	JP	NZ, MAIN_RELOAD_TRACK
+	CP	PLAY_PLAYING
+	JR	NZ, MAIN_NAV_DEFER
+	CALL	START_EXIT_SILENCE
+	LD	A, PLAY_PAUSED
+	LD	(PLAY_STATE), A		; same path as pause; NAV_SAVED keeps play
+MAIN_NAV_DEFER:
 	LD	A, NAV_DEBOUNCE_LEN
 	LD	(NAV_DEBOUNCE), A
+	; Auto-repeat fills the UART faster than one ANSI marker paint per
+	; frame. Drain queued nav now (update TRACK_SELECTED only), then
+	; paint once — otherwise hold >~3s backs up and "chokes" for seconds.
+	CALL	NAV_DRAIN_PENDING
 	CALL	UI_UPDATE_MARKER_DELTA
 	JP	MAIN_LOOP_NODELAY
+
+; Swallow extra arrow/WASD/N/P (and CSI) already waiting in BDOS.
+; First key of the burst already wrote TRACK_OLD + first TRACK_SELECTED;
+; further moves just advance TRACK_SELECTED. Non-nav byte → PENDING_KEY.
+; Incomplete CSI leaves ESC_CSI_STATE for the next frame.
+NAV_DRAIN_PENDING:
+	LD	B, 128			; cap (HBIOS FIFO is smaller)
+NAV_DRAIN_LOOP:
+	PUSH	BC
+	LD	C, $06
+	LD	E, $FF
+	CALL	BDOS
+	POP	BC
+	OR	A
+	RET	Z
+	AND	$7F
+	JR	Z, NAV_DRAIN_MORE
+	CALL	TO_UPPER
+	CP	KEY_QUIT_ESC
+	JP	Z, NAV_DRAIN_ESC
+	CP	'['
+	JP	Z, NAV_DRAIN_BRACK
+	LD	C, A
+	LD	A, (CSI_ARROW_STICKY)
+	OR	A
+	LD	A, C
+	JR	Z, NAV_DRAIN_WASD
+	CP	'A'
+	JR	Z, NAV_DRAIN_ST_UP
+	CP	'B'
+	JR	Z, NAV_DRAIN_ST_DN
+	CP	'C'
+	JR	Z, NAV_DRAIN_ST_RT
+	CP	'D'
+	JR	Z, NAV_DRAIN_ST_LF
+	PUSH	AF
+	XOR	A
+	LD	(CSI_ARROW_STICKY), A
+	LD	(CSI_STICKY_TTL), A
+	POP	AF
+NAV_DRAIN_WASD:
+	CP	KEY_NAV_UP
+	JR	Z, NAV_DRAIN_UP
+	CP	KEY_NAV_LEFT
+	JR	Z, NAV_DRAIN_LEFT
+	CP	KEY_NAV_DOWN
+	JR	Z, NAV_DRAIN_DOWN
+	CP	KEY_NAV_RIGHT
+	JR	Z, NAV_DRAIN_RIGHT
+	CP	KEY_NEXT
+	JR	Z, NAV_DRAIN_NXT
+	CP	KEY_PREV
+	JR	Z, NAV_DRAIN_PRV
+	LD	(PENDING_KEY), A
+	RET
+NAV_DRAIN_ST_UP:
+	CALL	MAIN_CSI_STICKY_TOUCH
+NAV_DRAIN_UP:
+	PUSH	BC
+	CALL	UI_NAV_UP
+NAV_DRAIN_STORE:
+	LD	(TRACK_SELECTED), A
+	POP	BC
+NAV_DRAIN_MORE:
+	DEC	B
+	JP	NZ, NAV_DRAIN_LOOP
+	RET
+NAV_DRAIN_ST_DN:
+	CALL	MAIN_CSI_STICKY_TOUCH
+NAV_DRAIN_DOWN:
+	PUSH	BC
+	CALL	UI_NAV_DOWN
+	JR	NAV_DRAIN_STORE
+NAV_DRAIN_ST_RT:
+	CALL	MAIN_CSI_STICKY_TOUCH
+NAV_DRAIN_RIGHT:
+	PUSH	BC
+	CALL	UI_NAV_RIGHT
+	JR	NAV_DRAIN_STORE
+NAV_DRAIN_ST_LF:
+	CALL	MAIN_CSI_STICKY_TOUCH
+NAV_DRAIN_LEFT:
+	PUSH	BC
+	CALL	UI_NAV_LEFT
+	JR	NAV_DRAIN_STORE
+NAV_DRAIN_NXT:
+	PUSH	BC
+	LD	A, (TRACK_SELECTED)
+	INC	A
+	LD	HL, TRACK_COUNT
+	CP	(HL)
+	JR	C, NAV_DRAIN_STORE
+	XOR	A
+	JR	NAV_DRAIN_STORE
+NAV_DRAIN_PRV:
+	PUSH	BC
+	LD	A, (TRACK_SELECTED)
+	OR	A
+	JR	NZ, NAV_DRAIN_PRV1
+	LD	A, (TRACK_COUNT)
+NAV_DRAIN_PRV1:
+	DEC	A
+	JR	NAV_DRAIN_STORE
+NAV_DRAIN_ESC:
+	PUSH	BC
+	CALL	UI_ESC_TRY
+	POP	BC
+NAV_DRAIN_CSI_RES:
+	CP	$FF
+	RET	Z			; tail next frame; marker already coalesced
+	OR	A
+	JR	Z, NAV_DRAIN_QUIT
+	CP	1
+	JR	NZ, NAV_DRAIN_SEQ
+	LD	A, (UI_IDXTMP)
+	CP	$FF
+	JR	Z, NAV_DRAIN_MORE	; swallowed non-arrow seq
+	LD	(TRACK_SELECTED), A
+	JR	NAV_DRAIN_MORE
+NAV_DRAIN_BRACK:
+	PUSH	BC
+	LD	A, $FF
+	LD	(UI_IDXTMP), A
+	CALL	UI_ESC_TRY_CSI
+	POP	BC
+	JR	NAV_DRAIN_CSI_RES
+NAV_DRAIN_QUIT:
+	LD	A, KEY_QUIT_ESC
+	LD	(PENDING_KEY), A
+	RET
+NAV_DRAIN_SEQ:
+	CP	2
+	JR	NZ, NAV_DRAIN_ENT
+	LD	A, $7F
+	LD	(PENDING_KEY), A
+	RET
+NAV_DRAIN_ENT:
+	LD	A, KEY_ENTER
+	LD	(PENDING_KEY), A
+	RET
 
 ; 'l' toggles LOOP_TRACK, 'L' toggles LOOP_PLAYLIST (mutually exclusive).
 ; Plain mode keeps the deferred scrolling message; UI mode redraws the
@@ -3240,13 +3555,14 @@ MAIN_LOOP_NODELAY:
 	CALL	PRINT_DEFERRED_STATUS
 	CALL	FORCED_DLY_FRAME_END
 
-	; Paused-browse debounce: reload once the selection has settled.
+	; Browse debounce: reload once the selection has settled.
 	LD	A, (NAV_DEBOUNCE)
 	OR	A
 	JR	Z, MAIN_NO_DEBOUNCE
 	DEC	A
 	LD	(NAV_DEBOUNCE), A
 	JP	Z, MAIN_RELOAD_TRACK
+	JP	MAIN_LOOP		; still settling — never treat as track-end
 MAIN_NO_DEBOUNCE:
 
 	; Check if stopped: handle loop/next logic
@@ -3283,6 +3599,8 @@ MAIN_LOOP_END:
 
 ; Drain any pending console input (e.g. Esc) before returning to CP/M.
 FLUSH_KEYS:
+	XOR	A
+	LD	(PENDING_KEY), A
 	LD	C, $06
 	LD	E, $FF
 FLUSH_KEYS_LOOP:
@@ -3365,15 +3683,23 @@ MAIN_RELOAD_DIRECT:
 
 ; Reload the track selected by TRACK_SELECTED from TRACK_LIST.
 ; Rebuilds FCB_WORK from the track name, reinits engine, re-enters main loop.
+; ANSI nav paint policy: marker (d1) immediately before disk I/O; track meta (c)
+; after load; full playlist (d2) never on this path (only first list / R-key
+; UI_FULL_REDRAW / delete).
 MAIN_RELOAD_TRACK:
 	CALL	FORCED_DLY_FRAME_END
 	XOR	A
 	LD	(NAV_DEBOUNCE), A	; no pending debounce survives a reload
 	LD	(PLAY_STATE), A		; stop ticks for the duration of reload I/O
+	LD	(ESC_CSI_STATE), A	; drop any in-flight CSI across reload
 	; Instant mute on track switch: the last register state would otherwise
 	; sustain on the PSG for the duration of the reload disk I/O (~300ms).
 	; TS-aware; no-op if the PSG is already silent (end-of-track advance).
 	CALL	START_EXIT_SILENCE
+	; d1: move '>' before slow load so selection feels instant.
+	LD	A, (UI_ACTIVE)
+	OR	A
+	CALL	NZ, UI_UPDATE_MARKER_DELTA
 	CALL	COPY_SELECTED_TRACK_TO_ARG
 	CALL	CLASSIFY_ARG_EXTENSION
 	OR	A
@@ -3395,9 +3721,12 @@ MAIN_RELOAD_TRACK:
 	CALL	APPLY_ENGINE_QDLY_ADJ
 	CALL	UPDATE_AUDIO_MODE_FROM_MUSIC
 	CALL	META_SNAPSHOT
+	; INIT/ROUT may leave audible residue; kill it before any slow UI work.
+	CALL	START_EXIT_SILENCE
 	LD	A, (UI_ACTIVE)
 	OR	A
 	JR	Z, MAIN_RELOAD_SHOW_PLAIN
+	; c: input/meta/hardware values only — not the playlist tiles.
 	CALL	UI_TRACK_STATUS_UPDATE
 	LD	A, (NAV_SAVED_STATE)
 	CP	PLAY_PAUSED
@@ -3411,7 +3740,7 @@ MAIN_RELOAD_SET_PLAYING:
 	LD	(PLAY_STATE), A
 	CALL	UI_DRAW_STATE_PLAYING
 MAIN_RELOAD_UI_DONE:
-	CALL	UI_UPDATE_MARKER_DELTA
+	CALL	UI_CURSOR_ON_SELECTED
 	JR	MAIN_RELOAD_STATE_OK
 MAIN_RELOAD_SHOW_PLAIN:
 	LD	A, (NAV_SAVED_STATE)
@@ -3428,6 +3757,10 @@ MAIN_RELOAD_STATE_OK:
 	; buffer; feeding them to the key handler now would parse half-arrived
 	; Esc sequences out of context. Ignore input typed while loading.
 	CALL	FLUSH_KEYS
+	XOR	A
+	LD	(ESC_CSI_STATE), A
+	LD	(CSI_ARROW_STICKY), A	; hold-repeat must not instant-retrigger
+	LD	(CSI_STICKY_TTL), A
 	LD	A, PLAY_PLAYING
 	LD	(NAV_SAVED_STATE), A	; consume: default is always play
 	LD	A, (UI_ACTIVE)
@@ -4408,15 +4741,17 @@ PRTSTR_DONE:
 	POP	AF
 	RET
 
-; Print the character in A via CP/M BDOS function 2. Preserves AF (some BDOS
-; builds return A=0, which would corrupt decimal/ANSI emit loops).
+; Print the character in A via BDOS fn 6 (direct out), not fn 2.
+; CP/M 2.2 fn 2 calls CONBRK and can steal a typed byte into kbchar;
+; fn 6 never sees that buffer, so Esc/CSI leftovers showed up on the
+; CCP line as ^[ or [. Preserves AF (some BDOS builds return A=0).
 PRTCHR:
 	PUSH	AF
 	PUSH	BC
 	PUSH	DE
 	PUSH	HL
 	LD	E, A
-	LD	C, $02
+	LD	C, $06
 	CALL	BDOS
 	POP	HL
 	POP	DE
@@ -4681,6 +5016,14 @@ NAV_SAVED_STATE:
 	.DB	PLAY_PLAYING		; pause preserved across nav-key switches
 NAV_DEBOUNCE:
 	.DB	0			; paused-browse reload countdown (0=idle)
+ESC_CSI_STATE:
+	.DB	ESC_ST_IDLE		; cross-frame Esc/[ /letter assembler
+CSI_ARROW_STICKY:
+	.DB	0			; $FF: bare A/B/C/D are CSI finals
+CSI_STICKY_TTL:
+	.DB	0			; idle frames until sticky clears
+PENDING_KEY:
+	.DB	0			; non-nav byte consumed by NAV_DRAIN_PENDING
 PTX_DONE:
 	.DB	0
 LOOP_MODE:

@@ -921,23 +921,16 @@ TCFG_SIZE_GETKEY_ESC:
 	RET
 
 ; Non-blocking peek with short spin. A=char (NZ) or A=0 (Z) on timeout.
-; Uses BDOS CONST (11) so we never block in GETKEY when the buffer is empty.
+; BDOS fn 6 only (GETKEY). Do not mix CONST (fn 11) with fn 6: CP/M 2.2
+; CONST can steal a byte into kbchar that fn 6 never returns.
 TCFG_GETCH_TO:
 	LD	BC, 8000		; ~brief settle for CSI tails on serial
 TCFG_GETCH_TO0:
 	PUSH	BC
-	LD	C, 11			; BDOS console status
-	CALL	BDOS
-	OR	A
-	JR	Z, TCFG_GETCH_TO1
 	CALL	GETKEY
 	POP	BC
 	OR	A
 	RET	NZ
-	JR	TCFG_GETCH_TO2
-TCFG_GETCH_TO1:
-	POP	BC
-TCFG_GETCH_TO2:
 	DEC	BC
 	LD	A, B
 	OR	C
@@ -1849,6 +1842,8 @@ CFG_PRTSTR_DONE:
 	RET
 
 ; Print the character in A via CP/M BDOS function 2.
+; Direct console out (BDOS fn 6), not fn 2: CP/M 2.2 fn 2 CONBRK can
+; steal a key into kbchar that fn 6 input never returns.
 ; Preserves AF: CP/M Plus / ZPM3 BDOS fn 2 returns A=0, which broke
 ; back-to-back PRTCHR calls (e.g. 3-space ruler erase emitted space+NUL+NUL).
 PRTCHR:
@@ -1857,7 +1852,7 @@ PRTCHR:
 	PUSH	DE
 	PUSH	HL
 	LD	E, A
-	LD	C, $02
+	LD	C, $06
 	CALL	BDOS
 	POP	HL
 	POP	DE
