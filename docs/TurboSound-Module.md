@@ -16,10 +16,12 @@ Support **two TurboSound hardware topologies**, user-selectable:
 ## Why a mode, not auto-detection
 
 The AVR module never drives the data bus (Hi-Z on reads by design). Port
-readback probing cannot *positively* prove a module is present. Auto topology
-treats Hi-Z on the configured play ports as module dual (FF/FE); `-tsm` / CFG
-module still force that path. Dual real cards need explicit CFG chip2 ports
-(RomWBW does not enumerate two AYs; Z180 must not probe alien pairs).
+readback probing cannot *positively* prove a module is present — write-only
+AY clones (e.g. KC89C72) look identical. Auto topology therefore only enables
+dual when HBIOS reports a second AY; it does **not** promote Hi-Z to module.
+Use `-tsm` / CFG module for the dual-AVR path. Dual real cards need explicit
+CFG chip2 ports (RomWBW does not enumerate two AYs; Z180 must not probe
+alien pairs).
 
 **Z180 port safety (v0.0.216+):** HBIOS platform id + `Z180_IO_BASE` (usually
 `$C0` on SC126/RCZ180) define an internal I/O window
@@ -27,9 +29,8 @@ module still force that path. Dual real cards need explicit CFG chip2 ports
 `$D0`/`$D8`) are not an external sound card. `SANITIZE_AY_PORTS` prints
 guidance (Rev5 → EB `$60`/`$68`; Rev6.1 → MSX `$A0`/`$A1` or Coleco
 `$50`/`$51`) and **aborts**. ROUT clears B before every `OUT (C),A` / `OUTI`.
-Dual-AVR module play auto-enables when play ports look Hi-Z (or via `-tsm` /
-CFG module). A TS file on a single readable AY plays chip 1 only
-(`Single-Card mode` in the UI).
+Dual-AVR module play requires `-tsm` / CFG module (Hi-Z alone is not enough).
+A TS file on a single chip plays chip 1 only (`Single-Card mode` in the UI).
 
 ## Architecture impact (small by design)
 

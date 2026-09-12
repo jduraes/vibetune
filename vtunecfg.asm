@@ -1937,7 +1937,7 @@ MSG_CARD_COLECO:
 MSG_CARD_SAME:
 	.DB	"Second card must differ from primary.", 0
 MSG_TSMENU:
-	.DB	"TurboSound mode? A=auto (Hi-Z=>AVR module), D=dual card (needs second AY in CFG), M=AVR module FF/FE", 0
+	.DB	"TurboSound mode? A=auto (2nd HBIOS AY or single), D=dual card (needs second AY in CFG), M=AVR module FF/FE", 0
 MSG_TSPROMPT:
 	.DB	"Choice [Enter keeps ", 0
 MSG_TS_AUTO:

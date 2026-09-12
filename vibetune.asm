@@ -2238,12 +2238,10 @@ TS_PORTS_SETUP:
 	CP	TS_TOPO_DUALCARD
 	JP	Z, TS_PORTS_CFG_DUAL
 
-	; Auto: try a second real AY (HBIOS), then Hi-Z ⇒ module.
-	CALL	TS_PORTS_TRY_DUALCARD
-	LD	A, (TS_DUALHW)
-	OR	A
-	RET	NZ
-	JP	TS_PORTS_AUTO_MODULE
+	; Auto: try a second real AY (HBIOS). Do NOT promote Hi-Z to
+	; AVR module — write-only AY clones (e.g. KC89C72) and empty
+	; buses look identical to the dual-AVR module. Use CFG/-tsm.
+	JP	TS_PORTS_TRY_DUALCARD
 
 ; CFG dual-card: chip1 = current play ports, chip2 = CFG_AY_CARD2.
 ; RomWBW does not enumerate two AYs; Z180 must not guess alien pairs.
@@ -2346,8 +2344,8 @@ TS_PORTS_TRY_DISTINCT:
 	JP	TS_PORTS_SETUP_DUAL_OK
 
 TS_PORTS_TRY_PROBE:
-	; Do not assign Coleco/MSX as a phantom chip2 — that skips
-	; TS_PORTS_AUTO_MODULE (FF/FE) and poisons PSG_REG_PORT on mute.
+	; Do not assign Coleco/MSX as a phantom chip2 — that would
+	; enable dual-card mute/routing on a single AY.
 	LD	A, (HBIOS_PLATFORM_ID)
 	CP	$08			; SCZ180
 	RET	Z
@@ -2364,23 +2362,6 @@ TS_PORTS_SETUP_DUAL_OK:
 	LD	(TS_DUALHW), A
 	RET
 
-; Auto-detect dual-AVR module: restore one port pair, Hi-Z ⇒ module dual.
-; Sets TS_TOPOLOGY=MODULE so SETPORTS/SLOWIO/mute use FF/FE.
-TS_PORTS_AUTO_MODULE:
-	LD	A, (TS_PORT1_RSEL)
-	LD	(TS_PORT2_RSEL), A
-	LD	A, (TS_PORT1_RDAT)
-	LD	(TS_PORT2_RDAT), A
-	CALL	TS_ASSIGN_DESC2
-	CALL	TSMOD_PROBE_CONFIGURED
-	OR	A
-	RET	Z			; readable AY → leave topology auto, dualhw=0
-	LD	A, TS_TOPO_MODULE
-	LD	(TS_TOPOLOGY), A
-	LD	A, 1
-	LD	(TS_DUALHW), A
-	RET
-
 ; Explicit -tsm / CFG module: one port pair, both chips via 0xFF/0xFE.
 ;
 ; The module is Hi-Z on reads — HBIOS/auto detection cannot see it — so CLI
@@ -2388,6 +2369,7 @@ TS_PORTS_AUTO_MODULE:
 ; are wrong. Enable dual when the *configured* play ports look Hi-Z (module or
 ; empty). Readable AY on those ports → real chip → chip 1 only (FF/FE on a
 ; real AY overlays both streams). Do not shotgun-probe foreign pairs.
+; (Auto topology never reaches here — Hi-Z is ambiguous with write-only clones.)
 TS_PORTS_SETUP_MODULE:
 	CALL	TS_ASSIGN_DESC2
 	CALL	TSMOD_PROBE_CONFIGURED
