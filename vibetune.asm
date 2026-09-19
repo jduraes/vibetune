@@ -4543,7 +4543,7 @@ LOAD_MF_OVERSIZE:
 	RET
 
 ; Convert ARG_BUFFER to a CP/M FCB at FCB_WORK.
-; Supports optional drive prefix (A:FILE.PT3) and 8.3 filename.
+; Supports optional drive (A:FILE.PT3) and ZPM3 user (3:FILE) prefixes, 8.3 name.
 ; Returns A = ERR_OK or ERR_INVALID_FILENAME.
 BUILD_FCB_FROM_ARG:
 	LD	HL, FCB_WORK
@@ -4673,27 +4673,32 @@ BUILD_FCB_INVALID:
 	LD	A, ERR_INVALID_FILENAME
 	RET
 
-; Skip optional ZPM3 user prefix (e.g. 3:RL2WOF). HL advanced on return.
+; Skip optional ZPM3 user prefix only when digits are followed by ':'.
+; Examples: 3:RL2WOF, 12:SONG. Leading digits without ':' are the filename
+; (06LOOKIN must not become LOOKIN / 6LOOKIN).
 BUILD_FCB_SKIP_USER_SPEC:
+	PUSH	HL
 	LD	A, (HL)
 	CP	'0'
-	RET	C
+	JR	C, BUILD_FCB_SKIP_USER_KEEP
 	CP	'9' + 1
-	RET	NC
-
+	JR	NC, BUILD_FCB_SKIP_USER_KEEP
 BUILD_FCB_SKIP_USER_DIG:
 	INC	HL
 	LD	A, (HL)
 	CP	'0'
-	JR	NC, BUILD_FCB_SKIP_USER_CHK
+	JR	C, BUILD_FCB_SKIP_USER_CHK
 	CP	'9' + 1
 	JR	NC, BUILD_FCB_SKIP_USER_CHK
 	JR	BUILD_FCB_SKIP_USER_DIG
-
 BUILD_FCB_SKIP_USER_CHK:
 	CP	':'
-	RET	NZ
-	INC	HL
+	JR	NZ, BUILD_FCB_SKIP_USER_KEEP
+	INC	HL			; consume ':'
+	POP	BC			; discard saved start
+	RET
+BUILD_FCB_SKIP_USER_KEEP:
+	POP	HL			; restore — digits belong to the name
 	RET
 
 TO_UPPER:
