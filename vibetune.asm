@@ -741,9 +741,15 @@ SCAN_SW_NO_EB:
 SCAN_SW_NO_DELAY:
 	LD	DE, MSG_SWITCH_TSM
 	CALL	SCAN_SWITCH_IN_CMD
-	JR	NZ, SCAN_SW_DONE
+	JR	NZ, SCAN_SW_NO_TSM
 	LD	A, TS_TOPO_MODULE
 	LD	(TS_TOPOLOGY), A
+SCAN_SW_NO_TSM:
+	LD	DE, MSG_SWITCH_SAA
+	CALL	SCAN_SWITCH_IN_CMD
+	JR	NZ, SCAN_SW_DONE
+	LD	A, 1
+	LD	(SAAMD), A		; SAA1099 direct I/O backend
 SCAN_SW_DONE:
 	RET
 
@@ -1077,6 +1083,9 @@ IS_KNOWN_SWITCH_TOKEN:
 	CALL	SWITCH_TOKEN_EQ
 	RET	Z
 	LD	DE, MSG_SWITCH_TSM
+	CALL	SWITCH_TOKEN_EQ
+	RET	Z
+	LD	DE, MSG_SWITCH_SAA
 	CALL	SWITCH_TOKEN_EQ
 	RET	Z
 	OR	$FF
@@ -2067,6 +2076,24 @@ PSG_IO_EXIT_DONE:
 PSG_ROUT_BLOCK:
 	LD	A, 1
 	LD	(PSG_TOUCHED), A
+	LD	A, (SAAMD)
+	OR	A
+	JR	Z, PSG_ROUT_BLOCK_AY
+	; SAA1099 backend: translate the 14-byte AY image at (HL).
+	; TSMOD_CURSEL $FE (TS module chip 2) -> SAA channels 3-5.
+	DI
+	PUSH	IX			; SAA_XLATE uses IX
+	LD	A, (TSMOD_CURSEL)
+	CP	$FE
+	LD	A, 0
+	JR	NZ, PSG_ROUT_SAA0
+	LD	A, 3
+PSG_ROUT_SAA0:
+	CALL	SAA_XLATE
+	POP	IX
+	EI
+	RET
+PSG_ROUT_BLOCK_AY:
 	DI
 	CALL	TSMOD_SLOWIO		; slow enter + optional module chip select
 	LD	A, (PSG_DATA_PORT)
@@ -2163,6 +2190,8 @@ PLAYBACK_TICK_DONE:
 
 #include "tsmodule.inc"
 
+#include "saa1099.inc"
+
 #DEFINE PTX_HDR_OFFSET $62
 #DEFINE PT3SIG0 'P'
 #DEFINE PT3SIG1 'T'
@@ -2222,6 +2251,19 @@ PTX_ENGINE_STOP:
 	RET
 
 TS_PORTS_SETUP:
+	LD	A, (SAAMD)
+	OR	A
+	JR	Z, TS_PORTS_SETUP_AY
+	; SAA1099 backend: one chip has 6 tone channels — play both TS chips
+	; on it, chip 1 -> SAA ch 0-2, chip 2 -> SAA ch 3-5.  Reuse the module
+	; topology: TS_SETPORTS1/2_MOD set TSMOD_CURSEL ($FF/$FE), and the SAA
+	; branch in ROUT maps that to base channel 0/3.
+	LD	A, TS_TOPO_MODULE
+	LD	(TS_TOPOLOGY), A
+	LD	A, 1
+	LD	(TS_DUALHW), A
+	RET
+TS_PORTS_SETUP_AY:
 	LD	A, (PSG_PLAY_REG_PORT)
 	LD	(TS_PORT1_RSEL), A
 	LD	(TS_PORT2_RSEL), A
@@ -3985,6 +4027,18 @@ PTX_TS_NEXT:
 ; Priority: 1) CLI (-msx/-rc/-eb/-coleco)  2) VTUNE.CFG primary card
 ;           3) HBIOS  4) probe  5) MSX default
 DETECT_HARDWARE_CONFIG:
+	LD	A, (SAAMD)
+	OR	A
+	JR	Z, DETECT_HW_AY
+	; SAA1099 backend: write-only chip on fixed ports $FF/$FE — no
+	; detection/probing possible or needed; just reset it and report.
+	LD	HL, HWSTR_SAA
+	LD	(HW_CONFIG_DESC), HL
+	CALL	CAPTURE_PLATFORM_Z180	; keep Z180_IO_BASE valid for timing gates
+	CALL	SAA_INIT
+	XOR	A
+	RET
+DETECT_HW_AY:
 	CALL	CHECK_HW_CLI_FLAGS
 	OR	A
 	JR	NZ, DETECT_HW_TRY_CFG
@@ -4136,25 +4190,23 @@ DETECT_HBIOS_PLATFORM:
 
 ; Map HBIOS platform id to Z180 I/O base (tune.com CFGTBL Z180 column).
 APPLY_Z180_FOR_PLATFORM:
-	LD	A, (HBIOS_PLATFORM_ID)
 	LD	HL, HW_Z180_PLT_TBL
 APPLY_Z180_LOOP:
-	CP	(HL)
-	JR	Z, APPLY_Z180_FOUND
+	LD	C, (HL)			; platform id, or $FF terminator
 	INC	HL
-	LD	A, (HL)
+	LD	B, (HL)			; Z180 I/O base
+	INC	HL
+	LD	A, C
 	CP	$FF
 	JR	Z, APPLY_Z180_NONE
-	INC	HL
 	LD	A, (HBIOS_PLATFORM_ID)
-	JR	APPLY_Z180_LOOP
-APPLY_Z180_NONE:
-	LD	A, $FF
+	CP	C
+	JR	NZ, APPLY_Z180_LOOP
+	LD	A, B
 	LD	(Z180_IO_BASE), A
 	RET
-APPLY_Z180_FOUND:
-	INC	HL
-	LD	A, (HL)
+APPLY_Z180_NONE:
+	LD	A, $FF
 	LD	(Z180_IO_BASE), A
 	RET
 
@@ -4792,7 +4844,8 @@ MSG_HELP_TEXT:
 	.DB	"  -rc       Force RC2014 standard PSG ports ($D8/$D0)", 13, 10
 	.DB	"  -coleco   Force Coleco PSG ports ($50/$51)", 13, 10
 	.DB	"  -eb       Force Ed Brindley (EB) sound module ports ($68/$60)", 13, 10
-	.DB	"  -tsm      Force TurboSound dual-AVR module mode (0xFF/0xFE); auto if Hi-Z", 13, 10, 13, 10
+	.DB	"  -tsm      Force TurboSound dual-AVR module mode (0xFF/0xFE); auto if Hi-Z", 13, 10
+	.DB	"  -saa      Play via SAA1099 card (direct I/O, ports 0xFF/0xFE)", 13, 10, 13, 10
 	.DB	"Playlist keys: Esc=quit, Space=pause, Enter=play (when paused), N/P=track,", 13, 10
 	.DB	"  WASD/arrows=nav, Delx3=delete, R=redraw, l/L=loop track/playlist", 0
 MSG_Z180_WARN:
@@ -4855,7 +4908,7 @@ MSG_USAGE:
 #ENDIF
 	.DB	"]", 0
 MSG_USAGE_SWITCHES:
-	.DB	"Valid switches: -help -credits -list -loop -delay -msx -rc -coleco -eb -tsm", 0
+	.DB	"Valid switches: -help -credits -list -loop -delay -msx -rc -coleco -eb -tsm -saa", 0
 MSG_SWITCH_LIST:
 	.DB	"-list", 0
 MSG_SWITCH_MSX:
@@ -4870,6 +4923,8 @@ MSG_SWITCH_DELAY:
 	.DB	"-delay", 0
 MSG_SWITCH_TSM:
 	.DB	"-tsm", 0
+MSG_SWITCH_SAA:
+	.DB	"-saa", 0
 MSG_SWITCH_HELP:
 	.DB	"-help", 0
 MSG_SWITCH_CREDITS:
@@ -4912,6 +4967,8 @@ MSG_TIMING_TIM:
 	.DB	"Timing: timer mode", 0
 HW_DESC_COLECO:
 	.DB	"Coleco ports ($50H/$51H)", 0
+HWSTR_SAA:
+	.DB	"SAA1099 sound card (direct I/O, $FFH/$FEH)", 0
 
 ;===============================================================================
 ; Initialized data (EMITTED into the .COM image; no .DS here).
@@ -4983,6 +5040,8 @@ WMOD:
 	.DB	0
 DELAYMD:
 	.DB	0
+SAAMD:
+	.DB	0			; 1 = SAA1099 direct I/O backend (-saa)
 FORCED_DLY_HWTIMER:
 	.DB	0
 HW_CONFIG_DESC:

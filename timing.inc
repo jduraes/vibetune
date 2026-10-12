@@ -59,6 +59,10 @@ APPLY_ENGINE_QDLY_ADJ:
 	JR	NZ, APPLY_QDLY_SUB
 	LD	DE, 125
 #ENDIF
+	LD	A, (SAAMD)		; SAA XLATE is ~1 ms/frame heavier than AY OUT;
+	OR	A			; widen offset (185->370) so the frame stays 20 ms
+	JR	Z, APPLY_QDLY_SUB
+	LD	DE, 310		; SAA XLATE ~1 ms/frame heavier; 93 BPM on rl2wof (Zed Mini)
 APPLY_QDLY_SUB:
 	OR	A
 	SBC	HL, DE
@@ -98,9 +102,14 @@ APPLY_QDLY_TS_TRIM_OK:
 	JR	APPLY_QDLY_STORE
 
 ; SC126 forced -delay (single-chip PTx): scale QDLY up (~114->94 BPM).
+; Z180 platforms only — this trim was tuned on SC126 hardware; on plain-Z80
+; machines (e.g. RC2014 Zed Mini) it wrongly stretches every frame ~21%.
 APPLY_QDLY_SC126_SCALE:
 	LD	A, (FORCED_DLY_HWTIMER)
 	OR	A
+	JR	Z, APPLY_QDLY_STORE
+	LD	A, (Z180_IO_BASE)	; $FF = not a Z180 platform
+	CP	$FF
 	JR	Z, APPLY_QDLY_STORE
 	LD	(QDLY), HL
 	CALL	SC126_DLY_SCALE
