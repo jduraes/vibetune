@@ -12,16 +12,12 @@ LoopChecker	.EQU	1	; SETUP bit7 = song ended; bit0=0 avoids CHECKLP POP (host lo
 BULBA_SETUP_INIT	.EQU	1
 Id		.EQU	0
 
-; VibeTune routes PSG via direct I/O (PSG_WRITE_ROUTED), not HBIOS BF_SND*.
+; VibeTune routes PSG via direct I/O (PSG_ROUT_BLOCK), not HBIOS BF_SND*.
 
 #DEFINE MDLADDR MUSIC_BUF
 #DEFINE PORTS BULBA_PORTS
 #DEFINE Z180 Z180_IO_BASE
 #DEFINE DCSAV PSG_IO_DCSAV
-
-ISHBIOS:
-	XOR	A
-	RET
 
 ; Module topology: select FF/FE inside the same slow-I/O window as ROUT.
 SLOWIO:

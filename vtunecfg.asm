@@ -12,7 +12,7 @@
 ;   byte 3: rows (0 -> default 24)
 ;   byte 4: cols (0 -> default 80)
 ;   byte 5: TS topology (0=auto, 1=dual-card, 2=single-card dual-AVR module)
-;   byte 6: primary AY card (0=auto, 1=MSX, 2=RC, 3=EB, 4=Coleco)
+;   byte 6: primary AY card (0=auto, 1=MSX, 2=RC, 3=EB, 4=Coleco, 5=SAA1099)
 ;   byte 7: second AY card for dual-card (0=none, 1..4 as above)
 ;
 ; vtune.com: CFG is the default; CLI (-msx/-rc/-eb/-coleco/-tsm) overrides.
@@ -52,6 +52,7 @@
 #DEFINE AY_CARD_RC     2
 #DEFINE AY_CARD_EB     3
 #DEFINE AY_CARD_COLECO 4
+#DEFINE AY_CARD_SAA    5
 
 #DEFINE TCFG_ORG_ROW 5
 #DEFINE TCFG_ORG_COL 5
@@ -322,7 +323,7 @@ CFG_LOAD_COLS_OK:
 CFG_LOAD_TS_OK:
 	LD	(CFG_TSTOPO), A
 	LD	A, (DMA_BUFFER+6)
-	CP	5
+	CP	6			; 5 = SAA1099 valid for primary only
 	JR	C, CFG_LOAD_C1_OK
 	XOR	A
 CFG_LOAD_C1_OK:
@@ -626,6 +627,8 @@ TCFG_ASK_CARD1_0:
 	JR	Z, TCFG_ASK_C1_EB
 	CP	'C'
 	JR	Z, TCFG_ASK_C1_COLECO
+	CP	'S'
+	JR	Z, TCFG_ASK_C1_SAA
 	JR	TCFG_ASK_CARD1_0
 TCFG_ASK_CARD1_KEEP:
 	CALL	CRLF
@@ -648,6 +651,10 @@ TCFG_ASK_C1_EB:
 	RET
 TCFG_ASK_C1_COLECO:
 	LD	A, AY_CARD_COLECO
+	LD	(CFG_CARD1), A
+	RET
+TCFG_ASK_C1_SAA:
+	LD	A, AY_CARD_SAA
 	LD	(CFG_CARD1), A
 	RET
 
@@ -735,6 +742,8 @@ PRINT_CARD_NAME:
 	JR	Z, PRINT_CARD_EB
 	CP	AY_CARD_COLECO
 	JR	Z, PRINT_CARD_COLECO
+	CP	AY_CARD_SAA
+	JR	Z, PRINT_CARD_SAA
 	LD	DE, MSG_CARD_AUTO
 	JP	PRTSTR
 PRINT_CARD_MSX:
@@ -748,6 +757,9 @@ PRINT_CARD_EB:
 	JP	PRTSTR
 PRINT_CARD_COLECO:
 	LD	DE, MSG_CARD_COLECO
+	JP	PRTSTR
+PRINT_CARD_SAA:
+	LD	DE, MSG_CARD_SAA
 	JP	PRTSTR
 
 ;-------------------------------------------------------------------------------
@@ -1917,7 +1929,8 @@ MSG_CFGCARD2:
 MSG_CFGTS:
 	.DB	"  TurboSound: ", 0
 MSG_CARD1MENU:
-	.DB	"Primary sound card? A=auto-detect, M=MSX ($A0/$A1), R=RC2014 ($D8/$D0), E=EB ($68/$60), C=Coleco ($50/$51)", 0
+	.DB	"Primary sound card? A=auto-detect, M=MSX ($A0/$A1), R=RC2014 ($D8/$D0),", 13, 10
+	.DB	" E=EB ($68/$60), C=Coleco ($50/$51), S=SAA1099 ($FF/$FE)", 0
 MSG_CARD2MENU:
 	.DB	"Second sound card (dual)? M=MSX, R=RC2014, E=EB, C=Coleco (must differ from primary)", 0
 MSG_CARDPROMPT:
@@ -1934,6 +1947,8 @@ MSG_CARD_EB:
 	.DB	"EB ($68H/$60H)", 0
 MSG_CARD_COLECO:
 	.DB	"Coleco ($50H/$51H)", 0
+MSG_CARD_SAA:
+	.DB	"SAA1099 ($FFH/$FEH)", 0
 MSG_CARD_SAME:
 	.DB	"Second card must differ from primary.", 0
 MSG_TSMENU:

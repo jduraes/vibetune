@@ -65,6 +65,7 @@
 #DEFINE HW_MODE_RC 2		; Force RC2014 standard ($D8/$D0)
 #DEFINE HW_MODE_EB 3		; Force EB module (platform-dependent)
 #DEFINE HW_MODE_COLECO 4	; Force Coleco ($50/$51)
+#DEFINE HW_MODE_SAA 5		; SAA1099 card ($FF/$FE, write-only; CFG-only, no CLI probe)
 
 ; Milestone 4: PSG hardware abstraction (AY-3-8910, RomWBW standard ports)
 ; Register select = write register number to PSG_REG_PORT
@@ -180,9 +181,7 @@ START:
 	JP	Z, START_UNKNOWN_SWITCH
 	CALL	PRINT_BANNER
 	LD	DE, MSG_ERR_UNSUPPORTED
-	CALL	PRTSTR
-	CALL	CRLF
-	JP	START_EXIT
+	JP	EXIT_ERR
 
 START_AFTER_PARSE_OK:
 	; Help/credits are usage-only: print and exit without probing hardware (avoids pops).
@@ -195,21 +194,19 @@ START_AFTER_PARSE_OK:
 	; Do not probe/query the AY for usage-only or parse errors (avoids pops).
 	CALL	DETECT_DISPLAY_MODE
 	CALL	UI_SETUP		; decide ANSI-list before printing banner/timing
-	LD	A, (UI_ACTIVE)
-	OR	A
+	CALL	UI_ACTIVE_TEST
 	JR	NZ, START_NO_PLAIN_BANNER
 	CALL	PRINT_BANNER
 START_NO_PLAIN_BANNER:
 	CALL	DETECT_HARDWARE_CONFIG
-	CALL	PSG_MUTE_DIRECT		; Belt-and-suspenders: zero all PSG regs after probe
+	CALL	PSG_MUTE_ALL		; Belt-and-suspenders: zero all PSG regs after probe
 	CALL	BULBA_SYNC_PORTS
 	; Snapshot Bulba self-mod + zeroed VARS once, before any INIT/PLAY.
 	; TS_INIT must reload this — not a post-play CTX_SAVE (poisoned template).
 	CALL	TS_CAPTURE_PRISTINE
 	CALL	PROBETIMER
 	CALL	INIT_QDLY_BASE
-	LD	A, (UI_ACTIVE)
-	OR	A
+	CALL	UI_ACTIVE_TEST
 	JR	NZ, START_NO_PLAIN_TIMING
 	CALL	PRINT_TIMING_MODE
 	CALL	CRLF
@@ -232,31 +229,25 @@ START_VALIDATE_FILE:
 
 START_VALIDATE_ENGINE:
 	; Engine init runs after LOAD_MUSIC_FILE (MUSIC_BUF must be valid).
-	JP	START_OK
+	JP	START_LOAD_AND_PLAY
 
 START_VALIDATE_FILE_ERR:
 	CP	ERR_FILE_NOT_FOUND
 	JP	Z, START_FILE_NOT_FOUND
 	LD	DE, MSG_ERR_FILE_READ
-	CALL	PRTSTR
-	CALL	CRLF
-	JP	START_EXIT
+	JP	EXIT_ERR
 
 START_HELP:
 	CALL	PRINT_BANNER
 	CALL	PRINT_USAGE
 	LD	DE, MSG_HELP_TEXT
-	CALL	PRTSTR
-	CALL	CRLF
-	JP	START_EXIT
+	JP	EXIT_MSG
 
 ; Attribution lives here only (not on the plain usage screen).
 START_CREDITS:
 	CALL	PRINT_BANNER
 	LD	DE, MSG_CREDITS
-	CALL	PRTSTR
-	CALL	CRLF
-	JP	START_EXIT
+	JP	EXIT_MSG
 
 START_NO_ARG:
 	CALL	PRINT_BANNER
@@ -265,6 +256,7 @@ START_NO_ARG:
 
 START_TOO_MANY:
 	CALL	PRINT_BANNER
+	CALL	PRTERR
 	LD	DE, MSG_ERR_TOO_MANY
 	CALL	PRTSTR
 	CALL	CRLF
@@ -300,6 +292,24 @@ PRINT_USAGE:
 	CALL	CRLF
 	RET
 
+; Print the shared "Error: " prefix. DE preserved for the message that follows.
+PRTERR:
+	PUSH	DE
+	LD	DE, MSG_ERR_PFX
+	CALL	PRTSTR
+	POP	DE
+	RET
+
+; Error exit: print "Error: " + message at DE + CRLF, then exit to CP/M.
+EXIT_ERR:
+	CALL	PRTERR
+	; fall through to EXIT_MSG
+; Message exit: print string at DE + CRLF, then exit to CP/M.
+EXIT_MSG:
+	CALL	PRTSTR
+	CALL	CRLF
+	JP	START_EXIT
+
 ; -loop was parsed before the run mode was known; resolve LOOP_MODE now.
 ; Playlist mode loops the playlist, direct-file mode loops the track.
 APPLY_LOOP_REQ:
@@ -318,37 +328,24 @@ APPLY_LOOP_REQ_SET:
 START_INVALID_FILENAME:
 	CALL	PRINT_BANNER
 	LD	DE, MSG_ERR_INVALID_FILENAME
-	CALL	PRTSTR
-	CALL	CRLF
-	JP	START_EXIT
+	JP	EXIT_ERR
 
 START_FILE_NOT_FOUND:
 	CALL	PRINT_BANNER
 	LD	DE, MSG_ERR_FILE_NOT_FOUND
-	CALL	PRTSTR
-	CALL	CRLF
-	JP	START_EXIT
+	JP	EXIT_ERR
 
 START_INVALID_DATA:
 	LD	DE, MSG_ERR_INVALID_DATA
-	CALL	PRTSTR
-	CALL	CRLF
-	JP	START_EXIT
+	JP	EXIT_ERR
 
 START_ENGINE_INIT_ERR:
 	LD	DE, MSG_ERR_ENGINE_INIT
-	CALL	PRTSTR
-	CALL	CRLF
-	JP	START_EXIT
+	JP	EXIT_ERR
 
 START_LOAD_FAIL:
 	LD	DE, MSG_ERR_FILE_READ
-	CALL	PRTSTR
-	CALL	CRLF
-	JP	START_EXIT
-
-START_OK:
-	JP	START_LOAD_AND_PLAY
+	JP	EXIT_ERR
 
 START_LOAD_AND_PLAY:
 	; Explicit filename path: load and start playback directly.
@@ -374,8 +371,7 @@ START_LOAD_ENGINE_OK:
 START_LOAD_SHOW_MODE:
 	CALL	META_SNAPSHOT
 	CALL	UPDATE_AUDIO_MODE_FROM_MUSIC
-	LD	A, (UI_ACTIVE)
-	OR	A
+	CALL	UI_ACTIVE_TEST
 	JR	Z, START_LOAD_SHOW_PLAIN
 	CALL	UI_TRACK_STATUS_BLOCK
 	JP	MAIN_LOOP
@@ -398,8 +394,7 @@ START_LOAD_SHOW_STATE:
 	JP	MAIN_LOOP
 
 START_SCAN:
-	LD	A, (UI_ACTIVE)		; UI_SETUP already ran after DETECT_DISPLAY_MODE
-	OR	A
+	CALL	UI_ACTIVE_TEST		; UI_SETUP already ran after DETECT_DISPLAY_MODE
 	JR	NZ, START_SCAN_UI
 	LD	DE, MSG_SCANNING
 	CALL	PRTSTR
@@ -410,15 +405,13 @@ START_SCAN:
 	LD	A, (TRACK_COUNT)
 	CALL	PRINT_DECIMAL_BYTE
 	CALL	CRLF
-	LD	A, (TRACK_COUNT)
-	OR	A
+	CALL	TRACK_COUNT_TEST
 	JP	Z, START_EXIT
 	CALL	PRINT_TRACK_LIST
 	JR	START_SCAN_CLASSIFY
 START_SCAN_UI:
 	CALL	SCAN_TRACKS
-	LD	A, (TRACK_COUNT)
-	OR	A
+	CALL	TRACK_COUNT_TEST
 	JP	Z, START_EXIT
 	CALL	UI_SHOW_PLAYLIST
 START_SCAN_CLASSIFY:
@@ -432,9 +425,7 @@ START_EXIT:
 	; Silence hardware first (before BDOS / deep call chains).
 	CALL	START_EXIT_SILENCE
 	; Restore CP/M default DMA (0080h) before returning to CCP/BDOS.
-	LD	DE, $0080
-	LD	C, $1A
-	CALL	BDOS
+	CALL	BDOS_DMA_DEFAULT
 START_EXIT_MSG:
 	LD	A, (EXIT_MSG_ON)
 	OR	A
@@ -456,6 +447,10 @@ START_EXIT_DONE:
 START_EXIT_SILENCE:
 	XOR	A
 	LD	(PSG_TOUCHED), A
+	LD	A, (SAAMD)
+	OR	A
+	JP	NZ, SAA_INIT		; SAA: full reset = silence (all amplitudes 0);
+					; TSMOD_MUTE would write AY sequences into SAA regs
 	LD	A, (TSFLAG)
 	OR	A
 	JR	NZ, START_EXIT_SILENCE_CHK
@@ -475,7 +470,7 @@ START_EXIT_SILENCE_CHK:
 	JP	Z, START_EXIT_SILENCE_MODULE
 START_EXIT_SILENCE_ONE:
 	CALL	RESTORE_PLAY_PSG_PORTS
-	JP	PSG_MUTE_DIRECT
+	JP	PSG_MUTE_ALL
 START_EXIT_SILENCE_MODULE:
 	JP	TSMOD_MUTE
 
@@ -551,9 +546,10 @@ DETECT_DISP_COLS_OK:
 	JR	NC, DETECT_DISP_CARDS	; out of range — keep auto
 	LD	(TS_TOPOLOGY), A
 DETECT_DISP_CARDS:
-	; Bytes 6-7: AY cards (old files zero-filled → auto / none)
+	; Bytes 6-7: AY cards (old files zero-filled → auto / none).
+	; Byte 6 also accepts 5 = SAA1099; byte 7 (dual-card second AY) does not.
 	LD	A, (DMA_BUFFER+6)
-	CP	5
+	CP	6
 	JR	C, DETECT_DISP_C1_OK
 	XOR	A
 DETECT_DISP_C1_OK:
@@ -633,12 +629,9 @@ PARSE_AND_CLASSIFY:
 	RET	NZ
 	LD	A, (RUN_MODE)
 	CP	RUNMODE_PLAY
-	JR	Z, PARSE_CLASSIFY_FILE
+	JP	Z, CLASSIFY_ARG_EXTENSION
 	XOR	A
 	RET
-
-PARSE_CLASSIFY_FILE:
-	JP	CLASSIFY_ARG_EXTENSION
 
 ; Case-insensitive substring search within bounded haystack (B bytes at HL).
 STRINDEX_UP_LEN:
@@ -662,11 +655,6 @@ STRINDEX_UP_LEN_OK:
 	XOR	A
 	RET
 
-; Substring search in default FCB name+ext ($5D..$67, 11 bytes). Leading switches
-; only (e.g. vtune -delay rl2wof). Interior NUL bytes are skipped, not fatal.
-STRINDEX_FCB:
-	JP	STRINDEX_UP_LEN
-
 ; Z = found if needle appears in bounded CLI tail or default FCB name field.
 ; DE = needle on entry. Uses GET_CMD_TAIL_LEN (does not require HL=$81).
 SCAN_SWITCH_IN_CMD:
@@ -678,10 +666,12 @@ SCAN_SWITCH_IN_CMD:
 	JR	Z, SCAN_SWITCH_FCB
 	CALL	STRINDEX_UP_LEN
 	RET	Z
+; Substring search in default FCB name+ext ($5D..$67, 11 bytes). Leading switches
+; only (e.g. vtune -delay rl2wof). Interior NUL bytes are skipped, not fatal.
 SCAN_SWITCH_FCB:
 	LD	HL, FCB + 1
 	LD	B, 11
-	JP	STRINDEX_FCB
+	JP	STRINDEX_UP_LEN
 
 ; Scan command line for switches (any token order). Primary: $0081 like tune.com.
 SCAN_CMDLINE_SWITCHES:
@@ -826,13 +816,6 @@ PARSE_CLR_ARG_BUF:
 	CALL	PARSE_TOKENS_FOR_FILENAME
 	OR	A
 	RET	NZ
-	LD	A, (RUN_MODE)
-	CP	RUNMODE_LIST
-	JR	Z, PARSE_CL_DONE
-	CP	RUNMODE_HELP
-	JR	Z, PARSE_CL_DONE
-	CP	RUNMODE_CREDITS
-	JR	Z, PARSE_CL_DONE
 	LD	A, (ARG_HAVE)
 	OR	A
 	JP	Z, PARSE_ERR_NO_ARG
@@ -1223,7 +1206,7 @@ CLASS_SCAN_NEXT:
 CLASS_SCAN_DONE:
 	LD	A, D
 	OR	E
-	JR	Z, CLASS_RESOLVE_MISSING_EXT
+	JR	Z, RESOLVE_MISSING_EXTENSION
 	EX	DE, HL
 	INC	HL
 
@@ -1287,9 +1270,6 @@ CLASS_TRY_MYM:
 CLASS_UNSUPPORTED:
 	LD	A, ERR_UNSUPPORTED_FORMAT
 	RET
-
-CLASS_RESOLVE_MISSING_EXT:
-	JP	RESOLVE_MISSING_EXTENSION
 
 ; Resolve extensionless ARG_BUFFER by probing files in this order:
 ;   .PT3 -> .PT2 -> .MYM
@@ -1420,14 +1400,10 @@ APPEND_EXT_MYM:
 ; Probe FCB_WORK existence by open/close.
 ; Returns A=1 if file exists, A=0 if missing.
 PROBE_FCB_EXISTS:
-	LD	DE, FCB_WORK
-	LD	C, $0F
-	CALL	BDOS
+	CALL	BDOS_FCB_OPEN
 	CP	$FF
 	JR	Z, PROBE_FCB_MISS
-	LD	DE, FCB_WORK
-	LD	C, $10
-	CALL	BDOS
+	CALL	BDOS_FCB_CLOSE
 	LD	A, 1
 	RET
 
@@ -1442,9 +1418,7 @@ VALIDATE_FILE_ACCESS:
 	OR	A
 	RET	NZ
 
-	LD	DE, FCB_WORK
-	LD	C, $0F
-	CALL	BDOS
+	CALL	BDOS_FCB_OPEN
 	CP	$FF
 	JR	Z, VALIDATE_FILE_MISSING
 
@@ -1460,16 +1434,12 @@ VALIDATE_FILE_ACCESS:
 	CP	1
 	JR	Z, VALIDATE_FILE_CLOSE_OK
 
-	LD	DE, FCB_WORK
-	LD	C, $10
-	CALL	BDOS
+	CALL	BDOS_FCB_CLOSE
 	LD	A, ERR_FILE_READ
 	RET
 
 VALIDATE_FILE_CLOSE_OK:
-	LD	DE, FCB_WORK
-	LD	C, $10
-	CALL	BDOS
+	CALL	BDOS_FCB_CLOSE
 	XOR	A
 	RET
 
@@ -1732,9 +1702,7 @@ SCAN_DONE:
 	; Restore DMA to default ($0080) before returning from scan.
 	; The DMA was set to DMA_BUFFER during BDOS 11h/12h calls; if we don't restore it,
 	; any subsequent BDOS call may read/write wrong location, corrupting memory.
-	LD	DE, $0080
-	LD	C, $1A
-	CALL	BDOS
+	CALL	BDOS_DMA_DEFAULT
 	LD	A, (TRACK_COUNT)
 	RET
 
@@ -1838,11 +1806,17 @@ EXTR_UNSUPPORTED:
 	XOR	A
 	RET
 
+; Z if the playlist is empty (TRACK_COUNT = 0). A = TRACK_COUNT.
+; RET preserves flags, so callers branch on the result directly.
+TRACK_COUNT_TEST:
+	LD	A, (TRACK_COUNT)
+	OR	A
+	RET
+
 ; Search TRACK_LIST for SCAN_NAME_BUF.
 ; Returns A=1 if found, A=0 if not.
 TRACK_LIST_FIND:
-	LD	A, (TRACK_COUNT)
-	OR	A
+	CALL	TRACK_COUNT_TEST
 	JR	Z, TRACK_FIND_NOTFOUND
 	LD	B, A
 	LD	HL, TRACK_LIST
@@ -1886,19 +1860,7 @@ TRACK_LIST_ADD:
 	CP	MAX_TRACKS
 	RET	NC
 	; Compute destination: TRACK_LIST + count * TRACK_NAME_LEN
-	LD	B, A
-	LD	HL, 0
-TRACK_ADD_MUL:
-	LD	A, B
-	OR	A
-	JR	Z, TRACK_ADD_MUL_DONE
-	DEC	B
-	LD	DE, TRACK_NAME_LEN
-	ADD	HL, DE
-	JR	TRACK_ADD_MUL
-TRACK_ADD_MUL_DONE:
-	LD	DE, TRACK_LIST
-	ADD	HL, DE
+	CALL	UI_TRACK_PTR
 	; Copy SCAN_NAME_BUF to HL (TRACK_NAME_LEN bytes)
 	LD	DE, SCAN_NAME_BUF
 	LD	B, TRACK_NAME_LEN
@@ -1916,8 +1878,7 @@ TRACK_ADD_COPY:
 ; Selected item (index == TRACK_SELECTED) is prefixed with "> ".
 ; All others are prefixed with "  ".
 PRINT_TRACK_LIST:
-	LD	A, (TRACK_COUNT)
-	OR	A
+	CALL	TRACK_COUNT_TEST
 	RET	Z
 	LD	B, A		; B = loop counter (TRACK_COUNT down to 1)
 	LD	C, 0		; C = current 0-based index
@@ -1977,62 +1938,6 @@ PRINT_DEC_UNITS:
 ;===============================================================================
 ; Milestone 4: Playback architecture foundation
 ;===============================================================================
-
-; Write AY register REG with value VAL.
-; Inputs: B = register number (0-13), C = value.
-; Clobbers: AF.
-PSG_WRITE_REG:
-	PUSH	BC
-	CALL	PSG_IO_SLOW_ENTER
-	LD	A, C			; Save value
-	LD	(PSG_TEMP_VAL), A
-	LD	A, (PSG_REG_PORT)	; Load RSEL port
-	LD	C, A
-	LD	A, B			; Register number
-	LD	B, 0
-	OUT	(C), A			; Write register select
-	LD	A, (PSG_DATA_PORT)	; Load RDAT port
-	LD	C, A
-	LD	A, (PSG_TEMP_VAL)	; Recover value
-	OUT	(C), A			; Write data
-	CALL	PSG_IO_SLOW_EXIT
-	POP	BC
-	RET
-
-; Write AY register REG with value VAL to optional chip B.
-; Inputs: B = register number (0-13), C = value.
-; Clobbers: AF, D, E.
-PSG_WRITE_REG_B:
-	PUSH	BC
-	CALL	PSG_IO_SLOW_ENTER
-	LD	A, C			; Save value
-	LD	(PSG_TEMP_VAL), A
-	LD	A, (PSG2_REG_PORT)	; Load RSEL port for chip B
-	LD	C, A
-	LD	A, B			; Register number
-	LD	B, 0
-	OUT	(C), A			; Write register select
-	LD	A, (PSG2_DATA_PORT)	; Load RDAT port for chip B
-	LD	C, A
-	LD	A, (PSG_TEMP_VAL)	; Recover value
-	OUT	(C), A			; Write data
-	CALL	PSG_IO_SLOW_EXIT
-	POP	BC
-	RET
-
-; Milestone 8 prep: route register writes through output mode.
-; AUDIO_OUT_AY: write only chip A.
-; AUDIO_OUT_TURBOSOUND: mirror writes to both chips.
-PSG_WRITE_ROUTED:
-	LD	A, 1
-	LD	(PSG_TOUCHED), A
-	LD	A, (AUDIO_OUT_MODE)
-	CP	AUDIO_OUT_TURBOSOUND
-	JR	NZ, PSG_WRITE_ROUTED_A
-	CALL	PSG_WRITE_REG
-	JP	PSG_WRITE_REG_B
-PSG_WRITE_ROUTED_A:
-	JP	PSG_WRITE_REG
 
 ; Z180 slow I/O (tune.com SLOWIO/NORMIO). Z180_IO_BASE=$C0 on RCZ180 EB per CFGTBL.
 PSG_IO_SLOW_ENTER:
@@ -2144,12 +2049,6 @@ PSG_MUTE_ALL:
 	LD	(PSG_TOUCHED), A
 	; tune.com default: direct ROUT mute (zeros + bulk write), not BF_SNDRESET.
 	JP	PSG_MUTE_ROUT
-
-PSG_SILENCE:
-	JP	PSG_MUTE_ALL
-
-PSG_MUTE_DIRECT:
-	JP	PSG_MUTE_ALL
 
 ; Playback state machine dispatcher.
 ; Called once per audio frame (50 Hz, polled in M6 main loop).
@@ -2352,13 +2251,7 @@ AY_CARD_TS2_COLECO:
 ; Probe HBIOS / tune-style fallback for a second distinct AY. Sets TS_DUALHW
 ; on success. On Z180, skip the non-readback card swap (unsafe I/O window).
 TS_PORTS_TRY_DUALCARD:
-	LD	HL, ($FFFC)
-	LD	A, 'W'
-	CP	(HL)
-	JR	NZ, TS_PORTS_TRY_PROBE
-	INC	HL
-	LD	A, ~'W'
-	CP	(HL)
+	CALL	HBIOS_IDENT_OK
 	JR	NZ, TS_PORTS_TRY_PROBE
 
 	LD	C, 1			; Query sound unit 1 (second device)
@@ -2987,8 +2880,7 @@ MAIN_LOOP_CLR_STICKY:
 ; Mute immediately when playing so the current note does not sustain through
 ; CSI wait / reload; skip PLAYBACK_TICK while ESC_CSI_STATE is pending.
 MAIN_ESC:
-	LD	A, (TRACK_COUNT)
-	OR	A
+	CALL	TRACK_COUNT_TEST
 	JP	Z, MAIN_ESC_QUIT		; direct-file: bare Esc quits
 	CALL	FORCED_DLY_FRAME_END	; EI before BDOS CSI probes
 	LD	A, (PLAY_STATE)
@@ -3004,8 +2896,7 @@ MAIN_ESC_ARM:
 ; Bare '[' in the key poll: Esc was dropped (hold-arrow desync). Treat as
 ; CSI introducer and spin for the final so 'A' is Up, not WASD Left.
 MAIN_ESC_ORPHAN_CSI:
-	LD	A, (TRACK_COUNT)
-	OR	A
+	CALL	TRACK_COUNT_TEST
 	JP	Z, MAIN_LOOP_NODELAY
 	CALL	FORCED_DLY_FRAME_END
 	LD	A, $FF
@@ -3065,8 +2956,7 @@ MAIN_ESC_QUIT:
 
 ; Triple-DEL arms deletion of the selected track (playlist mode only).
 MAIN_DEL_PRESS:
-	LD	A, (TRACK_COUNT)
-	OR	A
+	CALL	TRACK_COUNT_TEST
 	JP	Z, MAIN_LOOP_NODELAY	; single-file mode: ignore
 	LD	A, (DELCNT)
 	INC	A
@@ -3091,14 +2981,11 @@ MAIN_DELETE_ATTEMPT:
 	LD	(PLAY_STATE), A
 	CALL	START_EXIT_SILENCE
 MAIN_DEL_PROMPT:
-	LD	A, (UI_ACTIVE)
-	OR	A
+	CALL	UI_ACTIVE_TEST
 	JR	Z, MAIN_DEL_PROMPT_PLAIN
 	CALL	UI_FOOTER_STATE_ROW
 	JR	C, MAIN_DEL_PROMPT_PLAIN
-	PUSH	BC
 	CALL	UI_CLR_ROW
-	POP	BC
 	LD	C, 1
 	CALL	TCFG_ANSI_AT
 	CALL	TCFG_COL_PRM
@@ -3138,15 +3025,12 @@ MAIN_DEL_NO2:
 	CALL	MAIN_DEL_REDRAW_STATUS
 	JP	MAIN_LOOP
 MAIN_DEL_YES:
-	LD	A, (UI_ACTIVE)
-	OR	A
+	CALL	UI_ACTIVE_TEST
 	JR	Z, MAIN_DEL_YES_PLAIN
 	CALL	TCFG_COL_RST
 	CALL	UI_FOOTER_STATE_ROW
 	JR	C, MAIN_DEL_YES_PLAIN
-	PUSH	BC
 	CALL	UI_CLR_ROW
-	POP	BC
 	LD	C, 1
 	CALL	TCFG_ANSI_AT
 	JR	MAIN_DEL_YES2
@@ -3170,8 +3054,7 @@ MAIN_DEL_YES2:
 	LD	A, (TRACK_SELECTED)
 	LD	(DEL_STATE), A		; reuse as scratch: desired index
 	CALL	SCAN_TRACKS			; resets TRACK_COUNT/SELECTED
-	LD	A, (TRACK_COUNT)
-	OR	A
+	CALL	TRACK_COUNT_TEST
 	JP	Z, MAIN_LOOP_END		; nothing left — exit
 	; Restore the deleted slot, clamped to the new list end
 	LD	B, A				; B = count
@@ -3189,8 +3072,7 @@ MAIN_DEL_CLAMP_OK:
 
 ; Redraw the status row after a cancelled delete prompt.
 MAIN_DEL_REDRAW_STATUS:
-	LD	A, (UI_ACTIVE)
-	OR	A
+	CALL	UI_ACTIVE_TEST
 	JR	Z, MAIN_DEL_RS_PLAIN
 	LD	A, (PLAY_STATE)
 	CP	PLAY_PAUSED
@@ -3222,8 +3104,7 @@ MAIN_NAV_RIGHT:
 	CALL	UI_NAV_RIGHT
 MAIN_NAV_GO:
 	LD	(UI_IDXTMP), A		; UI_NAV_* clobber C; park the index
-	LD	A, (TRACK_COUNT)
-	OR	A
+	CALL	TRACK_COUNT_TEST
 	JP	Z, MAIN_LOOP_NODELAY
 	CALL	NAV_SAVE_IF_IDLE
 	LD	A, (TRACK_SELECTED)
@@ -3244,8 +3125,7 @@ MAIN_REDRAW_REQ:
 MAIN_REDRAW_STOP:
 	XOR	A
 	LD	(PLAY_STATE), A		; no ticks during paint
-	LD	A, (UI_ACTIVE)
-	OR	A
+	CALL	UI_ACTIVE_TEST
 	JR	Z, MAIN_REDRAW_RESUME
 	LD	A, (NAV_SAVED_STATE)
 	CP	PLAY_PAUSED
@@ -3283,8 +3163,7 @@ MAIN_PAUSE_TOGGLE:
 	LD	A, PLAY_PAUSED
 	LD	(PLAY_STATE), A
 	CALL	START_EXIT_SILENCE
-	LD	A, (UI_ACTIVE)
-	OR	A
+	CALL	UI_ACTIVE_TEST
 	JR	Z, MAIN_PAUSE_PLAIN
 	CALL	UI_DRAW_STATE_PAUSED
 	CALL	UI_CURSOR_ON_SELECTED
@@ -3308,8 +3187,7 @@ MAIN_RESUME:
 MAIN_RESUME_PLAY:
 	LD	A, PLAY_PLAYING
 	LD	(PLAY_STATE), A
-	LD	A, (UI_ACTIVE)
-	OR	A
+	CALL	UI_ACTIVE_TEST
 	JR	Z, MAIN_RESUME_PLAIN
 	CALL	UI_DRAW_STATE_PLAYING
 	CALL	UI_CURSOR_ON_SELECTED
@@ -3322,8 +3200,7 @@ MAIN_RESUME_PLAIN:
 ; Enter: resume when paused on the already-loaded track; otherwise load
 ; TRACK_SELECTED and play (e.g. paused browse with a pending selection).
 MAIN_ENTER_PLAY:
-	LD	A, (TRACK_COUNT)
-	OR	A
+	CALL	TRACK_COUNT_TEST
 	JP	Z, MAIN_LOOP_NODELAY	; direct-file mode: ignore
 	LD	A, (PLAY_STATE)
 	CP	PLAY_PAUSED
@@ -3341,8 +3218,7 @@ MAIN_ENTER_PLAY_RELOAD:
 	JP	MAIN_RELOAD_TRACK
 
 MAIN_NEXT:
-	LD	A, (TRACK_COUNT)
-	OR	A
+	CALL	TRACK_COUNT_TEST
 	JP	Z, MAIN_LOOP_NODELAY
 	CALL	NAV_SAVE_IF_IDLE	; don't clobber PLAY_PLAYING mid-settle
 	LD	A, (TRACK_SELECTED)
@@ -3357,8 +3233,7 @@ MAIN_NEXT_OK:
 	JP	MAIN_NAV_RELOAD_OR_DEFER
 
 MAIN_PREV:
-	LD	A, (TRACK_COUNT)
-	OR	A
+	CALL	TRACK_COUNT_TEST
 	JP	Z, MAIN_LOOP_NODELAY
 	CALL	NAV_SAVE_IF_IDLE	; don't clobber PLAY_PLAYING mid-settle
 	LD	A, (TRACK_SELECTED)
@@ -3562,8 +3437,7 @@ MAIN_LOOP_SET:
 MAIN_LOOP_SET_NEW:
 	LD	A, B
 	LD	(LOOP_MODE), A
-	LD	A, (UI_ACTIVE)
-	OR	A
+	CALL	UI_ACTIVE_TEST
 	JR	NZ, MAIN_LOOP_SET_UI
 	LD	A, (LOOP_MODE)
 	INC	A
@@ -3596,8 +3470,7 @@ MAIN_NO_DEBOUNCE:
 	LD	A, (LOOP_MODE)
 	CP	LOOP_TRACK
 	JP	Z, MAIN_RELOAD_CHECK
-	LD	A, (TRACK_COUNT)
-	OR	A
+	CALL	TRACK_COUNT_TEST
 	JR	Z, MAIN_LOOP_END		; direct-file playback, no loop — exit
 	; Playlist: track ended — always advance to the next track.
 	LD	A, (TRACK_SELECTED)
@@ -3663,8 +3536,7 @@ PDS_LOOP_PLAYLIST:
 	LD	DE, MSG_LOOP_PLAYLIST
 	JR	PDS_EMIT
 PDS_PAUSED:
-	LD	A, (UI_ACTIVE)
-	OR	A
+	CALL	UI_ACTIVE_TEST
 	JR	Z, PDS_PAUSED_PLAIN
 	CALL	UI_STATUS_PAUSED
 	RET
@@ -3672,8 +3544,7 @@ PDS_PAUSED_PLAIN:
 	LD	DE, MSG_STATE_PAUSED
 	JR	PDS_EMIT
 PDS_PLAYING:
-	LD	A, (UI_ACTIVE)
-	OR	A
+	CALL	UI_ACTIVE_TEST
 	JR	Z, PDS_PLAYING_PLAIN
 	CALL	UI_STATUS_PLAYING
 	RET
@@ -3691,8 +3562,7 @@ PDS_REDRAW:
 
 ; LOOP_TRACK: reload from disk (playlist) or re-init in memory (direct file).
 MAIN_RELOAD_CHECK:
-	LD	A, (TRACK_COUNT)
-	OR	A
+	CALL	TRACK_COUNT_TEST
 	JP	Z, MAIN_RELOAD_DIRECT
 	JP	MAIN_RELOAD_TRACK
 
@@ -3721,8 +3591,7 @@ MAIN_RELOAD_TRACK:
 	; TS-aware; no-op if the PSG is already silent (end-of-track advance).
 	CALL	START_EXIT_SILENCE
 	; d1: move '>' before slow load so selection feels instant.
-	LD	A, (UI_ACTIVE)
-	OR	A
+	CALL	UI_ACTIVE_TEST
 	CALL	NZ, UI_UPDATE_MARKER_DELTA
 	CALL	COPY_SELECTED_TRACK_TO_ARG
 	CALL	CLASSIFY_ARG_EXTENSION
@@ -3747,8 +3616,7 @@ MAIN_RELOAD_TRACK:
 	CALL	META_SNAPSHOT
 	; INIT/ROUT may leave audible residue; kill it before any slow UI work.
 	CALL	START_EXIT_SILENCE
-	LD	A, (UI_ACTIVE)
-	OR	A
+	CALL	UI_ACTIVE_TEST
 	JR	Z, MAIN_RELOAD_SHOW_PLAIN
 	; c: input/meta/hardware values only — not the playlist tiles.
 	CALL	UI_TRACK_STATUS_UPDATE
@@ -3787,8 +3655,7 @@ MAIN_RELOAD_STATE_OK:
 	LD	(CSI_STICKY_TTL), A
 	LD	A, PLAY_PLAYING
 	LD	(NAV_SAVED_STATE), A	; consume: default is always play
-	LD	A, (UI_ACTIVE)
-	OR	A
+	CALL	UI_ACTIVE_TEST
 	JP	NZ, MAIN_LOOP
 	CALL	CRLF
 	CALL	PRINT_TRACK_LIST	; refresh '>' marker on the new selection
@@ -3812,19 +3679,7 @@ MAIN_RELOAD_SHOW_STATE:
 ; Copy TRACK_SELECTED entry from TRACK_LIST to ARG_BUFFER.
 COPY_SELECTED_TRACK_TO_ARG:
 	LD	A, (TRACK_SELECTED)
-	LD	B, A
-	LD	HL, 0
-COPY_SEL_MUL:
-	LD	A, B
-	OR	A
-	JR	Z, COPY_SEL_MUL_DONE
-	DEC	B
-	LD	DE, TRACK_NAME_LEN
-	ADD	HL, DE
-	JR	COPY_SEL_MUL
-COPY_SEL_MUL_DONE:
-	LD	DE, TRACK_LIST
-	ADD	HL, DE
+	CALL	UI_TRACK_PTR
 	LD	DE, ARG_BUFFER
 	LD	B, TRACK_NAME_LEN
 COPY_SEL_CPY:
@@ -4029,7 +3884,16 @@ PTX_TS_NEXT:
 DETECT_HARDWARE_CONFIG:
 	LD	A, (SAAMD)
 	OR	A
-	JR	Z, DETECT_HW_AY
+	JR	NZ, DETECT_HW_SAA
+	LD	A, (CFG_AY_CARD1)	; VTUNE.CFG primary card 5 = SAA1099
+	CP	HW_MODE_SAA
+	JR	NZ, DETECT_HW_AY
+	LD	A, (HW_DETECT_MODE)	; CLI AY switch (-msx/-rc/-eb/-coleco) wins over CFG
+	OR	A
+	JR	NZ, DETECT_HW_AY
+	LD	A, 1
+	LD	(SAAMD), A
+DETECT_HW_SAA:
 	; SAA1099 backend: write-only chip on fixed ports $FF/$FE — no
 	; detection/probing possible or needed; just reset it and report.
 	LD	HL, HWSTR_SAA
@@ -4121,9 +3985,9 @@ CHECK_HW_CLI_DONE:
 	XOR	A
 	RET
 
-; If HBIOS is present, record platform id and map Z180_IO_BASE (DCNTL slow-I/O).
-; No-op when HBIOS is absent (Z180_IO_BASE stays as set by SET_CONFIG_*).
-CAPTURE_PLATFORM_Z180:
+; Z if the HBIOS ident ('W' + complement) is present at ($FFFC).
+; RET preserves flags, so callers branch on the result directly.
+HBIOS_IDENT_OK:
 	LD	HL, ($FFFC)
 	LD	A, 'W'
 	CP	(HL)
@@ -4131,6 +3995,12 @@ CAPTURE_PLATFORM_Z180:
 	INC	HL
 	LD	A, ~'W'
 	CP	(HL)
+	RET
+
+; If HBIOS is present, record platform id and map Z180_IO_BASE (DCNTL slow-I/O).
+; No-op when HBIOS is absent (Z180_IO_BASE stays as set by SET_CONFIG_*).
+CAPTURE_PLATFORM_Z180:
+	CALL	HBIOS_IDENT_OK
 	RET	NZ
 	LD	B, BF_SYSVER
 	LD	C, 0
@@ -4142,13 +4012,7 @@ CAPTURE_PLATFORM_Z180:
 ; Detect RomWBW HBIOS and query the primary AY device ports.
 ; Returns A=0 on success, A!=0 on failure.
 DETECT_HBIOS_PLATFORM:
-	LD	HL, ($FFFC)		; HL := pointer to HBIOS ident
-	LD	A, 'W'
-	CP	(HL)
-	RET	NZ
-	INC	HL
-	LD	A, ~'W'
-	CP	(HL)
+	CALL	HBIOS_IDENT_OK
 	RET	NZ
 
 	LD	B, BF_SYSVER
@@ -4506,9 +4370,7 @@ LOAD_MUSIC_FILE:
 	LD	(FCB_WORK+12), A	; EX = extent 0
 	LD	(FCB_WORK+32), A	; CR = current record 0
 	; Open file
-	LD	DE, FCB_WORK
-	LD	C, $0F
-	CALL	BDOS
+	CALL	BDOS_FCB_OPEN
 	CP	$FF
 	JR	Z, LOAD_MF_NOT_FOUND
 	; Setup IX = write pointer
@@ -4546,13 +4408,9 @@ LOAD_MF_BLOCK:
 
 LOAD_MF_EOF:
 	; Close file
-	LD	DE, FCB_WORK
-	LD	C, $10
-	CALL	BDOS
+	CALL	BDOS_FCB_CLOSE
 	; Restore default DMA before any further BDOS/console I/O (ZPM3/CP/M+).
-	LD	DE, $0080
-	LD	C, $1A
-	CALL	BDOS
+	CALL	BDOS_DMA_DEFAULT
 	; MUSIC_SIZE = IX - load_base (= blocks_read * 128)
 	PUSH	IX
 	POP	DE			; DE = current write pointer (next free block)
@@ -4585,12 +4443,8 @@ LOAD_MF_NOT_FOUND:
 	RET
 
 LOAD_MF_OVERSIZE:
-	LD	DE, FCB_WORK
-	LD	C, $10
-	CALL	BDOS
-	LD	DE, $0080
-	LD	C, $1A
-	CALL	BDOS
+	CALL	BDOS_FCB_CLOSE
+	CALL	BDOS_DMA_DEFAULT
 	LD	A, ERR_FILE_READ
 	RET
 
@@ -4807,6 +4661,23 @@ CRLF:
 	POP	AF
 	RET
 
+; BDOS tail-call helpers: end in JP BDOS so BDOS return values (A etc.)
+; pass straight through to the caller.
+BDOS_DMA_DEFAULT:
+	LD	DE, $0080
+	LD	C, $1A
+	JP	BDOS
+
+BDOS_FCB_OPEN:
+	LD	DE, FCB_WORK
+	LD	C, $0F
+	JP	BDOS
+
+BDOS_FCB_CLOSE:
+	LD	DE, FCB_WORK
+	LD	C, $10
+	JP	BDOS
+
 MSG_EXT_PT3:
 	.DB	".PT3", 0
 MSG_EXT_PT2:
@@ -4879,8 +4750,6 @@ TSSTR_RC:
 	.DB	"RC2014 standard ($D8H/$D0H)", 0
 TSSTR_UNKNOWN:
 	.DB	"Unknown AY port set", 0
-MSG_PLAYING:
-	.DB	"Playing... (Esc=quit)", 0
 MSG_STATE_PLAYING:
 	.DB	"State: Playing", 0
 MSG_STATE_PAUSED:
@@ -4891,6 +4760,11 @@ MSG_LOOP_TRACK:
 	.DB	"Loop mode: Track", 0
 MSG_LOOP_PLAYLIST:
 	.DB	"Loop mode: Playlist", 0
+; ANSI UI loop-status values alias the suffixes after "Loop mode: " (11 chars).
+; (EQUs must live here: TASM rejects forward references in equates.)
+MSG_LOOPSTAT_OFF	.EQU	MSG_LOOP_OFF + 11
+MSG_LOOPSTAT_TRK	.EQU	MSG_LOOP_TRACK + 11
+MSG_LOOPSTAT_PL	.EQU	MSG_LOOP_PLAYLIST + 11
 MSG_DEL_Q1:
 	.DB	"Are you sure you want to delete ", 0
 MSG_DEL_Q2:
@@ -4931,20 +4805,22 @@ MSG_SWITCH_CREDITS:
 	.DB	"-credits", 0
 MSG_SWITCH_LOOP:
 	.DB	"-loop", 0
+MSG_ERR_PFX:
+	.DB	"Error: ", 0
 MSG_ERR_TOO_MANY:
-	.DB	"Error: multiple arguments are not supported.", 0
+	.DB	"multiple arguments are not supported.", 0
 MSG_ERR_UNSUPPORTED:
-	.DB	"Error: unsupported extension (supported: .pt2, .pt3, .mym).", 0
+	.DB	"unsupported extension (supported: .pt2, .pt3, .mym).", 0
 MSG_ERR_INVALID_FILENAME:
-	.DB	"Error: invalid CP/M filename (use 8.3 format).", 0
+	.DB	"invalid CP/M filename (use 8.3 format).", 0
 MSG_ERR_FILE_NOT_FOUND:
-	.DB	"Error: file not found.", 0
+	.DB	"file not found.", 0
 MSG_ERR_FILE_READ:
-	.DB	"Error: unable to read input file.", 0
+	.DB	"unable to read input file.", 0
 MSG_ERR_INVALID_DATA:
-	.DB	"Error: invalid tune structure for selected format.", 0
+	.DB	"invalid tune structure for selected format.", 0
 MSG_ERR_ENGINE_INIT:
-	.DB	"Error: engine initialization failed.", 0
+	.DB	"engine initialization failed.", 0
 MSG_ERR_UNKNOWN_SWITCH_PFX:
 	.DB	"Error: unknown switch [", 0
 MSG_ERR_UNKNOWN_SWITCH_SFX:
@@ -5012,8 +4888,6 @@ PSG2_REG_PORT:
 	.DB	PSG2_REG_PORT_DEFAULT
 PSG2_DATA_PORT:
 	.DB	PSG2_DATA_PORT_DEFAULT
-PSG_TEMP_VAL:
-	.DB	0
 PSG_IO_DCSAV:
 	.DB	0
 Z180_IO_BASE:

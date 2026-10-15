@@ -51,13 +51,19 @@ UI_SETUP1:
 	LD	(UI_ACTIVE), A
 	RET
 
+; Z if the ANSI playlist UI is inactive (UI_ACTIVE = 0). A = UI_ACTIVE.
+; RET preserves flags, so callers branch on the result directly.
+UI_ACTIVE_TEST:
+	LD	A, (UI_ACTIVE)
+	OR	A
+	RET
+
 ;-------------------------------------------------------------------------------
 ; Frame: clear screen once, banner row 1 (cyan), key help row 2 (yellow)
 ;-------------------------------------------------------------------------------
 
 UI_ENSURE_INIT:
-	LD	A, (UI_ACTIVE)
-	OR	A
+	CALL	UI_ACTIVE_TEST
 	RET	Z
 	LD	A, (UI_INIT)
 	OR	A
@@ -107,11 +113,9 @@ UI_CALC_COLS3:
 ;-------------------------------------------------------------------------------
 
 UI_SHOW_PLAYLIST:
-	LD	A, (UI_ACTIVE)
-	OR	A
+	CALL	UI_ACTIVE_TEST
 	RET	Z
-	LD	A, (TRACK_COUNT)
-	OR	A
+	CALL	TRACK_COUNT_TEST
 	RET	Z
 	CALL	UI_ENSURE_INIT
 	CALL	UI_CALC_COLS
@@ -344,8 +348,7 @@ UI_DRAW_MARKER_ONLYX:
 ;-------------------------------------------------------------------------------
 
 UI_UPDATE_MARKER_DELTA:
-	LD	A, (UI_ACTIVE)
-	OR	A
+	CALL	UI_ACTIVE_TEST
 	RET	Z
 	LD	A, ' '
 	LD	(UI_MARK), A
@@ -364,11 +367,9 @@ UI_UPDATE_MARKER_DELTA:
 ;-------------------------------------------------------------------------------
 
 UI_CURSOR_ON_SELECTED:
-	LD	A, (UI_ACTIVE)
-	OR	A
+	CALL	UI_ACTIVE_TEST
 	RET	Z
-	LD	A, (TRACK_COUNT)
-	OR	A
+	CALL	TRACK_COUNT_TEST
 	RET	Z
 	PUSH	BC
 	PUSH	DE
@@ -399,8 +400,7 @@ UI_SHOW_FOOTER_P:
 
 ; "Looping Status: Off/Track/Playlist" on the row below State
 UI_SHOW_LOOP_STATUS:
-	LD	A, (UI_ACTIVE)
-	OR	A
+	CALL	UI_ACTIVE_TEST
 	RET	Z
 	CALL	UI_FOOTER_STATE_ROW
 	RET	C			; no room for State — skip loop too
@@ -408,9 +408,7 @@ UI_SHOW_LOOP_STATUS:
 	LD	A, (CFG_ROWS)
 	CP	B
 	RET	C
-	PUSH	BC
 	CALL	UI_CLR_ROW
-	POP	BC
 	LD	C, 1
 	CALL	TCFG_ANSI_AT
 	LD	DE, MSG_LOOPSTAT
@@ -458,16 +456,14 @@ UI_FOOTER_ROWS1:
 ;-------------------------------------------------------------------------------
 
 UI_STATUS_PLAYING:
-	LD	A, (UI_ACTIVE)
-	OR	A
+	CALL	UI_ACTIVE_TEST
 	RET	Z
 	CALL	UI_ENSURE_INIT
 	CALL	UI_DRAW_STATE_PLAYING
 	JP	UI_CURSOR_ON_SELECTED
 
 UI_STATUS_PAUSED:
-	LD	A, (UI_ACTIVE)
-	OR	A
+	CALL	UI_ACTIVE_TEST
 	RET	Z
 	CALL	UI_ENSURE_INIT
 	CALL	UI_DRAW_STATE_PAUSED
@@ -483,11 +479,7 @@ UI_DRAW_STATE_BODY:
 	CALL	UI_FOOTER_STATE_ROW
 	POP	AF
 	RET	C
-	PUSH	AF
-	PUSH	BC
 	CALL	UI_CLR_ROW
-	POP	BC
-	POP	AF
 	LD	C, 1
 	CALL	TCFG_ANSI_AT
 	OR	A
@@ -515,8 +507,7 @@ UI_GOTO_VALUE_ROW:
 ;-------------------------------------------------------------------------------
 
 UI_TRACK_STATUS_UPDATE:
-	LD	A, (UI_ACTIVE)
-	OR	A
+	CALL	UI_ACTIVE_TEST
 	RET	Z
 	LD	B, UI_ROW_INFO
 	CALL	UI_GOTO_VALUE_ROW
@@ -549,8 +540,7 @@ UI_TSU_FTYPE:
 ;-------------------------------------------------------------------------------
 
 UI_TRACK_STATUS_BLOCK:
-	LD	A, (UI_ACTIVE)
-	OR	A
+	CALL	UI_ACTIVE_TEST
 	RET	Z
 	CALL	UI_ENSURE_INIT
 	LD	B, UI_ROW_INFO
@@ -590,8 +580,7 @@ UI_TSB_PLAYING:
 ;-------------------------------------------------------------------------------
 
 UI_FULL_REDRAW:
-	LD	A, (UI_ACTIVE)
-	OR	A
+	CALL	UI_ACTIVE_TEST
 	RET	Z
 	XOR	A
 	LD	(UI_INIT), A
@@ -645,8 +634,7 @@ META_COPY322:
 
 ; Print metadata at rows 5/6 (UI mode).
 UI_PRINT_META:
-	LD	A, (UI_ACTIVE)
-	OR	A
+	CALL	UI_ACTIVE_TEST
 	RET	Z
 	LD	B, UI_ROW_META1
 	LD	C, 1
@@ -698,12 +686,10 @@ PSM_PLAIN2:
 ;-------------------------------------------------------------------------------
 
 UI_EXIT_TO_PROMPT:
-	LD	A, (UI_ACTIVE)
-	OR	A
+	CALL	UI_ACTIVE_TEST
 	RET	Z
 	CALL	UI_CALC_COLS
-	LD	A, (TRACK_COUNT)
-	OR	A
+	CALL	TRACK_COUNT_TEST
 	JR	NZ, UI_EXIT_PROMPT1
 	LD	A, UI_ROW_PLLIST + 1
 	JR	UI_EXIT_PROMPT4
@@ -766,10 +752,8 @@ UI_CLEAR_PLAYLIST1:
 	LD	A, E
 	CP	C
 	JR	C, UI_CLEAR_PLAYLIST2
-	PUSH	BC
 	LD	B, C
 	CALL	UI_CLR_ROW
-	POP	BC
 	INC	C
 	JR	UI_CLEAR_PLAYLIST1
 UI_CLEAR_PLAYLIST2:
@@ -995,8 +979,7 @@ UI_PL_COL_OF2:
 
 ; Up one row; wraps top -> bottom (column clamped on a short last row).
 UI_NAV_UP:
-	LD	A, (UI_ACTIVE)
-	OR	A
+	CALL	UI_ACTIVE_TEST
 	JP	Z, UI_NAV_LINEAR_PREV
 	CALL	UI_CALC_COLS
 	LD	A, (TRACK_SELECTED)
@@ -1025,8 +1008,7 @@ UI_NAV_UP_RET:
 
 ; Down one row; wraps bottom -> same column in the top row.
 UI_NAV_DOWN:
-	LD	A, (UI_ACTIVE)
-	OR	A
+	CALL	UI_ACTIVE_TEST
 	JP	Z, UI_NAV_LINEAR_NEXT
 	CALL	UI_CALC_COLS
 	LD	A, (TRACK_SELECTED)
@@ -1043,8 +1025,7 @@ UI_NAV_DOWN_RET:
 
 ; Left one column; wraps to the last entry of the current row.
 UI_NAV_LEFT:
-	LD	A, (UI_ACTIVE)
-	OR	A
+	CALL	UI_ACTIVE_TEST
 	JP	Z, UI_NAV_LINEAR_PREV
 	LD	A, (TRACK_SELECTED)
 	CALL	UI_PL_COL_OF
@@ -1069,8 +1050,7 @@ UI_NAV_LEFT_DEC:
 
 ; Right one column; wraps to the first entry of the current row.
 UI_NAV_RIGHT:
-	LD	A, (UI_ACTIVE)
-	OR	A
+	CALL	UI_ACTIVE_TEST
 	JP	Z, UI_NAV_LINEAR_NEXT
 	LD	A, (TRACK_SELECTED)
 	CALL	UI_PL_COL_OF
@@ -1330,12 +1310,6 @@ MSG_PLKEYS:
 	.DB	"Keys: Esc=quit, Space=pause, Enter=play, N/P=track, WASD=nav, (R)edraw, (l/L)oop trk/plist", 0
 MSG_LOOPSTAT:
 	.DB	"Looping Status: ", 0
-MSG_LOOPSTAT_OFF:
-	.DB	"Off", 0
-MSG_LOOPSTAT_TRK:
-	.DB	"Track", 0
-MSG_LOOPSTAT_PL:
-	.DB	"Playlist", 0
 MSG_SONGNAME:
 	.DB	"Song name:  ", 0
 MSG_ARTIST:

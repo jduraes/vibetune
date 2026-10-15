@@ -53,6 +53,14 @@ TSMOD_SELECT:
 ;----------------------------------------------------------------------
 TSMOD_MUTE:
 	LD	A, (TS_PORT1_RSEL)
+	OR	A
+	JR	NZ, TSMOD_MUTE_P1
+	LD	A, (PSG_PLAY_REG_PORT)	; non-TS track: TS_PORTS_SETUP never ran,
+	LD	(TS_PORT1_RSEL), A	; so TS_PORT1_* are still 0 — fall back to
+	LD	A, (PSG_PLAY_DATA_PORT)	; the play port pair (module chip 0)
+	LD	(TS_PORT1_RDAT), A
+TSMOD_MUTE_P1:
+	LD	A, (TS_PORT1_RSEL)
 	LD	(PSG_REG_PORT), A
 	LD	A, (TS_PORT1_RDAT)
 	LD	(PSG_DATA_PORT), A
