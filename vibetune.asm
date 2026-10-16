@@ -3767,7 +3767,12 @@ PRINT_HW_VAL_TS:
 
 PRINT_HW_VAL_AVR:
 	CALL	PRINT_HW_DESC_VALUE
+	LD	A, (SAAMD)	; SAA reuses module plumbing but no FF/FE select
+	OR	A
 	LD	DE, MSG_HW_AVR_TAG
+	JR	Z, PRINT_HW_VAL_AVR1
+	LD	DE, MSG_HW_SAA_TS
+PRINT_HW_VAL_AVR1:
 	JP	PRTSTR
 
 PRINT_HW_VAL_TS_SINGLE:
@@ -4744,6 +4749,8 @@ MSG_HW_SEP:
 	.DB	" / ", 0
 MSG_HW_AVR_TAG:
 	.DB	" - TurboSound 0xFF/0xFE chip select in use", 0
+MSG_HW_SAA_TS:
+	.DB	" - TurboSound 3+3 channels on one SAA1099", 0
 TSSTR_COLECO:
 	.DB	"Coleco AY ($50H/$51H)", 0
 TSSTR_RC:

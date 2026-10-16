@@ -91,6 +91,11 @@ APPLY_QDLY_CHK_DUAL:
 	; 856->90, 1084->97; bracket 94 => trim 856+(94-90)*(228/7) ~ 986.
 	LD	HL, (QDLY)
 	LD	DE, 986
+	LD	A, (SAAMD)		; SAA TS-dual: two XLATEs per frame run long;
+	OR	A			; at trim 986 -> 88 BPM, slope ~32.6 units/BPM
+	JR	Z, APPLY_QDLY_TS_SUB
+	LD	DE, 1149		; -> +163 for 93 BPM (Zed Mini, rl2wofts)
+APPLY_QDLY_TS_SUB:
 	OR	A
 	SBC	HL, DE
 	JR	NC, APPLY_QDLY_TS_TRIM_OK
