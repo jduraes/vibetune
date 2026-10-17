@@ -3,9 +3,10 @@
 [14-Sep-2026]
 
 RomWBW CP/M music player for real Z80-family hardware. `vtune.com` plays PT2
-and PT3 (AY-3-8910 / YM2149), with an ANSI playlist UI and TurboSound (two
-cards or a dual-AVR module). Default builds omit MYM; `Build.cmd MYM` adds it.
-`vtunecfg.com` writes `VTUNE.CFG` (display, AY card, TurboSound topology).
+and PT3 on AY-3-8910 / YM2149 cards and on the SAA1099, with an ANSI playlist
+UI and TurboSound (two cards, a dual-AVR module, or one SAA1099). Default
+builds omit MYM; `Build.cmd MYM` adds it. `vtunecfg.com` writes `VTUNE.CFG`
+(display, sound card, TurboSound topology).
 
 Current release: **v0.1.1**.
 
@@ -21,8 +22,8 @@ Current release: **v0.1.1**.
   footer. Plain terminals get a scrolling list. Same key path on CP/M 2.2,
   CP/M 3, ZPM3 and ZDOS.
 - **Config:** `vtunecfg` sets terminal type, colour, screen size (up to
-  150×50), primary AY, TurboSound mode, and optional second card. CFG is the
-  default; CLI switches override it.
+  150×50), primary card (AY cards or SAA1099), TurboSound mode, and optional
+  second card. CFG is the default; CLI switches override it.
 - **Timing:** HBIOS timer when present; otherwise a calibrated delay loop
   (`-delay` forces delay mode).
 
@@ -37,6 +38,11 @@ Auto-detect uses the HBIOS platform ID and port probing. CLI / CFG override:
 | `-rc`     | RC2014 standard              | `$D8 / $D0`      |
 | `-coleco` | Coleco                       | `$50 / $51`      |
 | `-eb`     | Ed Brindley (EB) module      | `$68 / $60`      |
+| `-saa`    | SAA1099                      | `$FF / $FE`      |
+
+The SAA1099 is write-only and cannot be probed, so it is never auto-detected —
+select it with `-saa` or as primary card 5 in `vtunecfg` (not valid as the
+second card of a dual-card pair).
 
 On Z80 (RC2014 / RCZ80) the EB module is `$D8/$D0`. On Z180 (SC126 / RCZ180)
 those ports sit in the internal I/O window and are rejected; use `-eb` or
@@ -59,11 +65,29 @@ A TS file on a single chip plays chip 1 only (UI: Single-Card).
 
 Single-chip files are unchanged. See `docs/TurboSound-Module.md`.
 
+## SAA1099
+
+The SAA1099 backend (`saa1099.inc`, `-saa` / CFG primary card 5) translates
+each AY register frame onto the 6-channel SAA:
+
+- **Stereo in software.** The SAA has per-channel left/right amplitudes but no
+  AY-style hardware channel mixing, so panning is applied by lookup tables:
+  A → left, C → right, B → both sides at ~62% (the AY's golden-ratio split).
+- **Envelope bass.** AY envelope-shaped channels are remapped to SAA channels
+  2/5 (the two hardware envelope channels). The envelope is clocked by a
+  silent tone on channel 1 at twice the envelope rate, and the audible channel
+  plays a sustain carrier whose pitch derives from the AY envelope period —
+  that period, not the note period, is what carries the envelope-bass pitch.
+  A zero envelope period plays flat (AY frozen-envelope idiom).
+- **TurboSound files play on one chip:** chip 1 → SAA channels 0–2, chip 2 →
+  channels 3–5, no `0xFF`/`0xFE` chip-select latching needed. Enveloped
+  channels on the second chip play flat (no spare clock channel).
+
 ## Usage
 
 ```
 VTUNE [switches] file[.pt3|.pt2]
-Valid switches: -help -credits -list -loop -delay -msx -rc -coleco -eb -tsm
+Valid switches: -help -credits -list -loop -delay -msx -rc -coleco -eb -tsm -saa
 ```
 
 (`file[.mym]` only in a MYM build.)
@@ -92,8 +116,8 @@ Keep sources dual-assembler clean (`#IF`/`#ENDIF`, explicit `(IX+0)`).
 Outputs copy to `../RomWBW/Binary/Apps/`.
 
 Key sources: `vibetune.asm`, `ansiui.inc`, `pt3bulba.inc` / `pt3shim.inc`,
-`timing.inc`, `tsmodule.inc`, `mymeng.inc` (optional), `vtunecfg.asm`,
-`vtver.inc`.
+`timing.inc`, `tsmodule.inc`, `saa1099.inc`, `mymeng.inc` (optional),
+`vtunecfg.asm`, `vtver.inc`.
 
 ## Docs
 
