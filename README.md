@@ -38,11 +38,14 @@ Auto-detect uses the HBIOS platform ID and port probing. CLI / CFG override:
 | `-rc`     | RC2014 standard              | `$D8 / $D0`      |
 | `-coleco` | Coleco                       | `$50 / $51`      |
 | `-eb`     | Ed Brindley (EB) module      | `$68 / $60`      |
-| `-saa`    | SAA1099                      | `$FF / $FE`      |
+| `-saa`    | SAA1099                      | `$75 / $74`      |
 
 The SAA1099 is write-only and cannot be probed, so it is never auto-detected —
 select it with `-saa` or as primary card 5 in `vtunecfg` (not valid as the
-second card of a dual-card pair).
+second card of a dual-card pair). The card is expected jumpered at `$74/$75`:
+the Sam Coupé-style `$FF/$FE` default is unusable on Z180 machines, where
+`$C0–$FF` is the CPU's internal I/O window (`$FF` = ICR, `$FE` = OMCR —
+writing there hangs the machine).
 
 On Z80 (RC2014 / RCZ80) the EB module is `$D8/$D0`. On Z180 (SC126 / RCZ180)
 those ports sit in the internal I/O window and are rejected; use `-eb` or

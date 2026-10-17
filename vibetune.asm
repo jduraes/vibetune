@@ -4721,7 +4721,7 @@ MSG_HELP_TEXT:
 	.DB	"  -coleco   Force Coleco PSG ports ($50/$51)", 13, 10
 	.DB	"  -eb       Force Ed Brindley (EB) sound module ports ($68/$60)", 13, 10
 	.DB	"  -tsm      Force TurboSound dual-AVR module mode (0xFF/0xFE); auto if Hi-Z", 13, 10
-	.DB	"  -saa      Play via SAA1099 card (direct I/O, ports 0xFF/0xFE)", 13, 10, 13, 10
+	.DB	"  -saa      Play via SAA1099 card (direct I/O, ports 0x75/0x74)", 13, 10, 13, 10
 	.DB	"Playlist keys: Esc=quit, Space=pause, Enter=play (when paused), N/P=track,", 13, 10
 	.DB	"  WASD/arrows=nav, Delx3=delete, R=redraw, l/L=loop track/playlist", 0
 MSG_Z180_WARN:
@@ -4851,7 +4851,7 @@ MSG_TIMING_TIM:
 HW_DESC_COLECO:
 	.DB	"Coleco ports ($50H/$51H)", 0
 HWSTR_SAA:
-	.DB	"SAA1099 sound card (direct I/O, $FFH/$FEH)", 0
+	.DB	"SAA1099 sound card (direct I/O, $75H/$74H)", 0
 
 ;===============================================================================
 ; Initialized data (EMITTED into the .COM image; no .DS here).

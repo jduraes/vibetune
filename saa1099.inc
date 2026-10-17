@@ -12,8 +12,8 @@
 ;
 ; Hardware (Etched Pixels-style RC2014 SAA1099 card, 8 MHz clock, verified
 ; on real hardware):
-;   Port $FF = register select (write register number)
-;   Port $FE = data
+;   Port $75 = register select (write register number)
+;   Port $74 = data
 ;
 ; A TurboSound PT3 plays both chips on the one SAA: callers pass the SAA
 ; base channel in A (0 = AY chip 1, 3 = AY chip 2).  In TS-dual mode each
@@ -79,8 +79,8 @@
 ;
 ;===============================================================================
 
-SAA_RSEL	.EQU	$FF	; SAA1099 register select port
-SAA_RDAT	.EQU	$FE	; SAA1099 data port
+SAA_RSEL	.EQU	$75	; SAA1099 register select port
+SAA_RDAT	.EQU	$74	; SAA1099 data port
 
 ;===============================================================================
 ; SAA_INIT - Reset and enable the SAA1099

@@ -1948,7 +1948,7 @@ MSG_CARD_EB:
 MSG_CARD_COLECO:
 	.DB	"Coleco ($50H/$51H)", 0
 MSG_CARD_SAA:
-	.DB	"SAA1099 ($FFH/$FEH)", 0
+	.DB	"SAA1099 ($75H/$74H)", 0
 MSG_CARD_SAME:
 	.DB	"Second card must differ from primary.", 0
 MSG_TSMENU:
