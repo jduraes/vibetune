@@ -1,6 +1,6 @@
 # VibeTune
 
-[14-Sep-2026]
+[16-Oct-2026]
 
 RomWBW CP/M music player for real Z80-family hardware. `vtune.com` plays PT2
 and PT3 on AY-3-8910 / YM2149 cards and on the SAA1099, with an ANSI playlist
@@ -8,7 +8,7 @@ UI and TurboSound (two cards, a dual-AVR module, or one SAA1099). Default
 builds omit MYM; `Build.cmd MYM` adds it. `vtunecfg.com` writes `VTUNE.CFG`
 (display, sound card, TurboSound topology).
 
-Current release: **v0.1.1**.
+Current release: **v0.1.32** (branch `saa1099`).
 
 ## Features
 
