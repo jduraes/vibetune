@@ -8,7 +8,7 @@ UI and TurboSound (two cards, a dual-AVR module, or one SAA1099). Default
 builds omit MYM; `Build.cmd MYM` adds it. `vtunecfg.com` writes `VTUNE.CFG`
 (display, sound card, TurboSound topology).
 
-Current release: **v0.1.38** (branch `saa1099`).
+Current release: **v0.1.40** (branch `saa1099`).
 
 ## Features
 

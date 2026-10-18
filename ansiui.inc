@@ -593,7 +593,9 @@ UI_FULL_REDRAW:
 	JP	UI_TRACK_STATUS_BLOCK
 
 ;-------------------------------------------------------------------------------
-; Metadata: snapshot PT3 title/author from MUSIC_BUF ($1E/$42, 32 chars each).
+; Metadata: snapshot PT3 title/author from MUSIC_BUF. Compilation layout
+; (signature at +0): title at $1E, author at $42, 32 chars each. Classic
+; layout (signature at $1E): title = 30-byte name field at +0, author blank.
 ; Bytes outside 32..126 are sanitised to spaces so renderers can print raw.
 ; Non-PTx engines (MYM) have no header metadata: both fields are blanked.
 ;-------------------------------------------------------------------------------
@@ -615,6 +617,25 @@ META_BLANK321:
 	DJNZ	META_BLANK321
 	RET
 META_SNAP_PTX:
+	CALL	PTX_MATCH_VORTEX_MUSIC
+	OR	A
+	JR	Z, META_SNAP_COMP
+	CALL	PTX_MATCH_PROTRACKER_MUSIC
+	OR	A
+	JR	Z, META_SNAP_COMP
+	; Classic layout: plain 30-byte name at +0, signature at $1E. No
+	; reliable author field — blank "by:" rather than print garbage.
+	LD	HL, MUSIC_BUF
+	LD	DE, METATITLE
+	LD	B, 30
+	CALL	META_COPYN
+	LD	A, ' '
+	LD	(DE), A		; pad title to 32 chars
+	INC	DE
+	LD	(DE), A
+	LD	DE, METAARTIST
+	JP	META_BLANK32
+META_SNAP_COMP:
 	LD	HL, MUSIC_BUF + $1E
 	LD	DE, METATITLE
 	CALL	META_COPY32
@@ -622,7 +643,7 @@ META_SNAP_PTX:
 	LD	DE, METAARTIST
 META_COPY32:
 	LD	B, $20
-META_COPY321:
+META_COPYN:
 	LD	A, (HL)
 	CP	32
 	JR	C, META_COPYFIX
@@ -634,7 +655,7 @@ META_COPY322:
 	LD	(DE), A
 	INC	HL
 	INC	DE
-	DJNZ	META_COPY321
+	DJNZ	META_COPYN
 	RET
 
 ; Print metadata at rows 5/6 (UI mode).
