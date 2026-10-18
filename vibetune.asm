@@ -3251,6 +3251,7 @@ MAIN_ENTER_PLAY_RELOAD:
 MAIN_NEXT:
 	CALL	NAV_PREP
 	JP	Z, MAIN_LOOP_NODELAY
+	LD	A, (TRACK_SELECTED)	; NAV_PREP returns the count in A
 	INC	A
 	LD	HL, TRACK_COUNT
 	CP	(HL)
@@ -3263,6 +3264,7 @@ MAIN_NEXT_OK:
 MAIN_PREV:
 	CALL	NAV_PREP
 	JP	Z, MAIN_LOOP_NODELAY
+	LD	A, (TRACK_SELECTED)	; NAV_PREP returns the count in A
 	OR	A
 	JR	NZ, MAIN_PREV_DEC
 	LD	A, (TRACK_COUNT)
@@ -3287,12 +3289,16 @@ NAV_SAVE_IF_IDLE:
 
 ; Nav-key preamble: Z when no tracks (caller jumps to MAIN_LOOP_NODELAY);
 ; otherwise saves play state if idle and snapshots TRACK_SELECTED to TRACK_OLD.
+; Returns A = TRACK_COUNT with NZ intact: NAV_SAVE_IF_IDLE's OR A would leave
+; flags describing NAV_DEBOUNCE, not the track count (v0.1.37 nav regression).
 NAV_PREP:
 	CALL	TRACK_COUNT_TEST
 	RET	Z
+	PUSH	AF			; keep count/NZ across the save+snapshot
 	CALL	NAV_SAVE_IF_IDLE
 	LD	A, (TRACK_SELECTED)
 	LD	(TRACK_OLD), A
+	POP	AF
 	RET
 
 ; Track selected by a manual nav key (arrows / WASD / N/P).
