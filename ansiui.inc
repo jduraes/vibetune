@@ -535,6 +535,15 @@ UI_TSU_FTYPE:
 	CALL	PRINT_PLAYBACK_HW_VALUE
 	RET
 
+; Repaint just the hardware value (row 7) — O-key output-toggle feedback.
+UI_OUT_HW_ROW:
+	CALL	UI_ACTIVE_TEST
+	RET	Z
+	LD	B, UI_ROW_INFO2
+	CALL	UI_GOTO_VALUE_ROW
+	CALL	PRINT_PLAYBACK_HW_VALUE
+	JP	UI_CURSOR_ON_SELECTED
+
 ;-------------------------------------------------------------------------------
 ; Track status block (rows 4-7): input+type, metadata, hardware
 ;-------------------------------------------------------------------------------
@@ -1307,7 +1316,7 @@ UI_ESC_NAV_DONE:
 ;-------------------------------------------------------------------------------
 
 MSG_PLKEYS:
-	.DB	"Keys: Esc=quit, Space=pause, Enter=play, N/P=track, WASD=nav, (R)edraw, (l/L)oop trk/plist", 0
+	.DB	"Keys: Esc=quit, Space=pause, Enter=play, N/P=track, WASD=nav, (O)utput, (R)edraw, (l/L)oop trk/plist", 0
 MSG_LOOPSTAT:
 	.DB	"Looping Status: ", 0
 MSG_SONGNAME:

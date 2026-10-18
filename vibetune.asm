@@ -65,7 +65,7 @@
 #DEFINE HW_MODE_RC 2		; Force RC2014 standard ($D8/$D0)
 #DEFINE HW_MODE_EB 3		; Force EB module (platform-dependent)
 #DEFINE HW_MODE_COLECO 4	; Force Coleco ($50/$51)
-#DEFINE HW_MODE_SAA 5		; SAA1099 card ($FF/$FE, write-only; CFG-only, no CLI probe)
+#DEFINE HW_MODE_SAA 5		; SAA1099 card ($75/$74, write-only; CFG/CLI only, no probe)
 
 ; Milestone 4: PSG hardware abstraction (AY-3-8910, RomWBW standard ports)
 ; Register select = write register number to PSG_REG_PORT
@@ -102,6 +102,9 @@
 #DEFINE STATUS_PLAYING      5
 #DEFINE STATUS_LOOP_UI      6	; redraw loop status line (ANSI UI)
 #DEFINE STATUS_REDRAW       7	; full UI redraw (R key)
+#DEFINE STATUS_OUT_AY       8	; O: output switched to the AY/YM path
+#DEFINE STATUS_OUT_SAA      9	; O: output switched to the SAA1099
+#DEFINE STATUS_OUT_NONE     10	; O: no alternate output available
 ; Key bindings
 #DEFINE KEY_QUIT   'Q'
 #DEFINE KEY_QUIT_L 'q'
@@ -118,6 +121,7 @@
 #DEFINE KEY_LOOP_L 'l'
 #DEFINE KEY_REDRAW   'R'
 #DEFINE KEY_REDRAW_L 'r'
+#DEFINE KEY_OUTPUT 'O'		; live AY <-> SAA1099 output toggle
 #DEFINE KEY_NAV_UP    'W'
 #DEFINE KEY_NAV_UP_L  'w'
 #DEFINE KEY_NAV_LEFT  'A'
@@ -2157,6 +2161,12 @@ TS_PORTS_SETUP:
 	; on it, chip 1 -> SAA ch 0-2, chip 2 -> SAA ch 3-5.  Reuse the module
 	; topology: TS_SETPORTS1/2_MOD set TSMOD_CURSEL ($FF/$FE), and the SAA
 	; branch in ROUT maps that to base channel 0/3.
+	; Seed chip-1 ports from the AY play pair so an O-toggle to AY has
+	; sane ports (SAA mode otherwise leaves TS_PORT1_* zeroed).
+	LD	A, (PSG_PLAY_REG_PORT)
+	LD	(TS_PORT1_RSEL), A
+	LD	A, (PSG_PLAY_DATA_PORT)
+	LD	(TS_PORT1_RDAT), A
 	LD	A, TS_TOPO_MODULE
 	LD	(TS_TOPOLOGY), A
 	LD	A, 1
@@ -2827,6 +2837,8 @@ MAIN_KEY_GOT:
 	JP	Z, MAIN_LOOP_TRK_TOGGLE
 	CP	KEY_REDRAW
 	JP	Z, MAIN_REDRAW_REQ
+	CP	KEY_OUTPUT
+	JP	Z, MAIN_OUTPUT_TOGGLE
 	; CSI auto-repeat sticky: bare A/B/C/D mean arrows, not WASD.
 	LD	C, A
 	LD	A, (CSI_ARROW_STICKY)
@@ -3146,6 +3158,71 @@ MAIN_REDRAW_PAUSED:
 	LD	A, PLAY_PAUSED
 	LD	(PLAY_STATE), A
 	JP	MAIN_LOOP
+
+; O: switch live output between the AY/YM path and the SAA1099 mid-song.
+; Mutes the chip being left, flips SAAMD (the per-frame dispatch flag in
+; PSG_ROUT_BLOCK), mutes the target chip (no stuck notes), swaps the
+; Hardware: description, and queues a deferred status note (printed after
+; WAITQ, so no console I/O before the frame delay). Song position is
+; untouched: the same AY register image just routes to the other chip.
+; The SAA is write-only (no presence test), so AY->SAA is always allowed;
+; SAA->AY requires an AY source found at startup (OUT_AY_AV = 0).
+; TurboSound: dual AY cards -> one SAA playing 3+3 (topology forced to the
+; module plumbing while SAAMD=1, restored on the way back).
+MAIN_OUTPUT_TOGGLE:
+	LD	A, (SAAMD)
+	OR	A
+	JR	Z, MAIN_OUT_TO_SAA
+	; SAA -> AY: only when an AY path was configured/detected at startup
+	LD	A, (OUT_AY_AV)
+	OR	A
+	JR	NZ, MAIN_OUT_NONE
+	CALL	START_EXIT_SILENCE	; SAAMD=1: SAA full reset
+	XOR	A
+	LD	(SAAMD), A
+	LD	A, (OUT_SAVED_TOPO)
+	CP	$FF
+	JR	Z, MAIN_OUT_TO_AY1
+	LD	(TS_TOPOLOGY), A	; restore pre-toggle AY topology
+	LD	A, $FF
+	LD	(OUT_SAVED_TOPO), A
+MAIN_OUT_TO_AY1:
+	CALL	OUT_SWAP_DESC
+	CALL	START_EXIT_SILENCE	; silence target AY side too
+	LD	A, STATUS_OUT_AY
+	JR	MAIN_OUT_DONE
+MAIN_OUT_TO_SAA:
+	; AY -> SAA1099 (always allowed; see header note)
+	CALL	START_EXIT_SILENCE	; SAAMD=0: AY/TS-aware mute
+	LD	A, 1
+	LD	(SAAMD), A
+	LD	A, (TS_DUALHW)		; dual AY topology -> single SAA 3+3
+	OR	A
+	JR	Z, MAIN_OUT_TO_SAA1
+	LD	A, (TS_TOPOLOGY)
+	CP	TS_TOPO_MODULE
+	JR	Z, MAIN_OUT_TO_SAA1	; already module: nothing to save
+	LD	(OUT_SAVED_TOPO), A
+	LD	A, TS_TOPO_MODULE
+	LD	(TS_TOPOLOGY), A
+MAIN_OUT_TO_SAA1:
+	CALL	OUT_SWAP_DESC
+	CALL	START_EXIT_SILENCE	; SAA_INIT: clean slate on the target
+	LD	A, STATUS_OUT_SAA
+MAIN_OUT_DONE:
+	LD	(STATUS_MSG_PENDING), A
+	JP	MAIN_LOOP_NODELAY
+MAIN_OUT_NONE:
+	LD	A, STATUS_OUT_NONE
+	JR	MAIN_OUT_DONE
+
+; Swap the active and alternate hardware description pointers (O toggle).
+OUT_SWAP_DESC:
+	LD	HL, (HW_CONFIG_DESC)
+	LD	DE, (ALT_HW_DESC)
+	LD	(HW_CONFIG_DESC), DE
+	LD	(ALT_HW_DESC), HL
+	RET
 
 MAIN_QUIT:
 	CALL	FORCED_DLY_FRAME_END
@@ -3515,8 +3592,14 @@ PRINT_DEFERRED_STATUS:
 	XOR	A
 	LD	(STATUS_MSG_PENDING), A
 	POP	AF
+	CP	STATUS_OUT_AY
+	JR	Z, PDS_OUT_AY
+	CP	STATUS_OUT_SAA
+	JR	Z, PDS_OUT_SAA
+	CP	STATUS_OUT_NONE
+	JR	Z, PDS_OUT_NONE
 	CP	STATUS_REDRAW
-	JR	Z, PDS_REDRAW
+	JP	Z, PDS_REDRAW
 	CP	STATUS_LOOP_UI
 	JR	Z, PDS_LOOP_UI
 	CP	STATUS_PLAYING
@@ -3542,6 +3625,37 @@ PDS_PAUSED:
 	RET
 PDS_PAUSED_PLAIN:
 	LD	DE, MSG_STATE_PAUSED
+	JR	PDS_EMIT
+PDS_OUT_AY:
+	CALL	UI_ACTIVE_TEST
+	JR	Z, PDS_OUT_AY_PLAIN
+	CALL	UI_OUT_HW_ROW
+	RET
+PDS_OUT_AY_PLAIN:
+	LD	DE, MSG_OUT_AY
+	JR	PDS_EMIT
+PDS_OUT_SAA:
+	CALL	UI_ACTIVE_TEST
+	JR	Z, PDS_OUT_SAA_PLAIN
+	CALL	UI_OUT_HW_ROW
+	RET
+PDS_OUT_SAA_PLAIN:
+	LD	DE, MSG_OUT_SAA
+	JR	PDS_EMIT
+PDS_OUT_NONE:
+	CALL	UI_ACTIVE_TEST
+	JR	Z, PDS_OUT_NONE_PLAIN
+	; UI: show the note on the State footer row (next state change rewrites it)
+	CALL	UI_FOOTER_STATE_ROW
+	RET	C
+	CALL	UI_CLR_ROW
+	LD	C, 1
+	CALL	TCFG_ANSI_AT
+	LD	DE, MSG_OUT_NONE
+	CALL	PRTSTR
+	JP	UI_CURSOR_ON_SELECTED
+PDS_OUT_NONE_PLAIN:
+	LD	DE, MSG_OUT_NONE
 	JR	PDS_EMIT
 PDS_PLAYING:
 	CALL	UI_ACTIVE_TEST
@@ -3899,13 +4013,53 @@ DETECT_HARDWARE_CONFIG:
 	LD	A, 1
 	LD	(SAAMD), A
 DETECT_HW_SAA:
-	; SAA1099 backend: write-only chip on fixed ports $FF/$FE — no
+	; SAA1099 backend: write-only chip on fixed ports $75/$74 — no
 	; detection/probing possible or needed; just reset it and report.
+	; Also locate an AY path so the O key can toggle output live: the AY
+	; side counts as known only when CLI / CFG / HBIOS / probe found one
+	; (the bare MSX fallback leaves OUT_AY_AV set and O shows a note).
+	CALL	DETECT_HW_AY_KNOWN	; A=0 when an AY source applied
+	LD	(OUT_AY_AV), A
+	LD	HL, (HW_CONFIG_DESC)	; detected AY description (for O toggle)
+	LD	(ALT_HW_DESC), HL
 	LD	HL, HWSTR_SAA
 	LD	(HW_CONFIG_DESC), HL
-	CALL	CAPTURE_PLATFORM_Z180	; keep Z180_IO_BASE valid for timing gates
 	CALL	SAA_INIT
 	XOR	A
+	RET
+
+; Same chain as DETECT_HW_AY (CLI -> CFG -> HBIOS -> probe -> MSX default),
+; but reports A=0 only when a real AY source applied; A=1 on bare fallback.
+DETECT_HW_AY_KNOWN:
+	CALL	CHECK_HW_CLI_FLAGS
+	OR	A
+	JR	NZ, DAK_TRY_CFG
+	XOR	A
+	RET
+DAK_TRY_CFG:
+	CALL	APPLY_CFG_CARD1
+	OR	A
+	JR	NZ, DAK_TRY_HBIOS
+	XOR	A
+	RET
+DAK_TRY_HBIOS:
+	CALL	DETECT_HBIOS_PLATFORM
+	OR	A
+	JR	NZ, DAK_TRY_PROBE
+	CALL	SANITIZE_AY_PORTS
+	XOR	A
+	RET
+DAK_TRY_PROBE:
+	CALL	PROBE_HARDWARE_CONFIG
+	OR	A
+	JR	NZ, DAK_NONE
+	CALL	SANITIZE_AY_PORTS
+	XOR	A
+	RET
+DAK_NONE:
+	CALL	SET_CONFIG_MSX
+	CALL	CAPTURE_PLATFORM_Z180	; keep Z180_IO_BASE valid for timing gates
+	LD	A, 1
 	RET
 DETECT_HW_AY:
 	CALL	CHECK_HW_CLI_FLAGS
@@ -4723,7 +4877,8 @@ MSG_HELP_TEXT:
 	.DB	"  -tsm      Force TurboSound dual-AVR module mode (0xFF/0xFE); auto if Hi-Z", 13, 10
 	.DB	"  -saa      Play via SAA1099 card (direct I/O, ports 0x75/0x74)", 13, 10, 13, 10
 	.DB	"Playlist keys: Esc=quit, Space=pause, Enter=play (when paused), N/P=track,", 13, 10
-	.DB	"  WASD/arrows=nav, Delx3=delete, R=redraw, l/L=loop track/playlist", 0
+	.DB	"  WASD/arrows=nav, Delx3=delete, R=redraw, l/L=loop track/playlist,", 13, 10
+	.DB	"  O=toggle AY<->SAA1099 output", 0
 MSG_Z180_WARN:
 	.DB	"Cannot use these AY ports on this Z180 machine.", 13, 10, 13, 10
 	.DB	"  $D0/$D8 (-rc) overlap the Z180 internal I/O window", 13, 10
@@ -4767,6 +4922,12 @@ MSG_LOOP_TRACK:
 	.DB	"Loop mode: Track", 0
 MSG_LOOP_PLAYLIST:
 	.DB	"Loop mode: Playlist", 0
+MSG_OUT_AY:
+	.DB	"Output: AY/YM sound card", 0
+MSG_OUT_SAA:
+	.DB	"Output: SAA1099 sound card", 0
+MSG_OUT_NONE:
+	.DB	"Output: no alternate output available", 0
 ; ANSI UI loop-status values alias the suffixes after "Loop mode: " (11 chars).
 ; (EQUs must live here: TASM rejects forward references in equates.)
 MSG_LOOPSTAT_OFF	.EQU	MSG_LOOP_OFF + 11
@@ -4922,7 +5083,13 @@ WMOD:
 DELAYMD:
 	.DB	0
 SAAMD:
-	.DB	0			; 1 = SAA1099 direct I/O backend (-saa)
+	.DB	0			; 1 = SAA1099 direct I/O backend (-saa / O toggle)
+ALT_HW_DESC:
+	.DW	HWSTR_SAA		; 'other chip' description (O toggle; SAA in AY mode)
+OUT_AY_AV:
+	.DB	0			; SAA mode: 0 = an AY source was found at startup
+OUT_SAVED_TOPO:
+	.DB	$FF			; AY TS topology saved across an AY->SAA toggle
 FORCED_DLY_HWTIMER:
 	.DB	0
 HW_CONFIG_DESC:

@@ -1,6 +1,6 @@
 # VibeTune
 
-[16-Oct-2026]
+[18-Oct-2026]
 
 RomWBW CP/M music player for real Z80-family hardware. `vtune.com` plays PT2
 and PT3 on AY-3-8910 / YM2149 cards and on the SAA1099, with an ANSI playlist
@@ -8,7 +8,7 @@ UI and TurboSound (two cards, a dual-AVR module, or one SAA1099). Default
 builds omit MYM; `Build.cmd MYM` adds it. `vtunecfg.com` writes `VTUNE.CFG`
 (display, sound card, TurboSound topology).
 
-Current release: **v0.1.32** (branch `saa1099`).
+Current release: **v0.1.34** (branch `saa1099`).
 
 ## Features
 
@@ -85,6 +85,13 @@ each AY register frame onto the 6-channel SAA:
 - **TurboSound files play on one chip:** chip 1 → SAA channels 0–2, chip 2 →
   channels 3–5, no `0xFF`/`0xFE` chip-select latching needed. Enveloped
   channels on the second chip play flat (no spare clock channel).
+- **Live A/B with `O`:** while a song plays, `O` switches output between the
+  AY/YM path and the SAA1099 (mute → flip → mute, position kept). When
+  started with `-saa`/CFG card 5, the AY side is located at startup too
+  (CLI/CFG/HBIOS/probe); if none was found, `O` shows "no alternate output
+  available". Starting on AY and pressing `O` trusts that an SAA is fitted —
+  the chip is write-only and cannot be probed. A dual-card TurboSound song
+  toggles between "dual AY" and "single SAA (3+3)".
 
 ## Usage
 
@@ -98,6 +105,7 @@ Valid switches: -help -credits -list -loop -delay -msx -rc -coleco -eb -tsm -saa
 Playlist keys: `Esc` quit, `Space` pause, `Enter` play the selection (when
 paused; loads it if you have been browsing), `N`/`P` next/previous,
 `WASD`/arrows navigate, `R` redraw (mute + full UI refresh, no disk),
+`O` toggle live output between the AY/YM card and the SAA1099,
 `l`/`L` loop track/playlist, `DEL` ×3 delete the selected file.
 
 ```
