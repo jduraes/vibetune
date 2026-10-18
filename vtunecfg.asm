@@ -13,7 +13,8 @@
 ;   byte 4: cols (0 -> default 80)
 ;   byte 5: TS topology (0=auto, 1=dual-card, 2=single-card dual-AVR module)
 ;   byte 6: primary AY card (0=auto, 1=MSX, 2=RC, 3=EB, 4=Coleco, 5=SAA1099)
-;   byte 7: second AY card for dual-card (0=none, 1..4 as above)
+;   byte 7: second card for dual-card (0=none, 1..4 as above, 5=SAA1099 as
+;           O-toggle alternate only — never a TurboSound second AY)
 ;
 ; vtune.com: CFG is the default; CLI (-msx/-rc/-eb/-coleco/-tsm) overrides.
 ;
@@ -329,7 +330,7 @@ CFG_LOAD_TS_OK:
 CFG_LOAD_C1_OK:
 	LD	(CFG_CARD1), A
 	LD	A, (DMA_BUFFER+7)
-	CP	5
+	CP	6			; 5 = SAA1099: O-toggle alternate only (never a TS 2nd AY)
 	JR	C, CFG_LOAD_C2_OK
 	XOR	A
 CFG_LOAD_C2_OK:
@@ -659,7 +660,8 @@ TCFG_ASK_C1_SAA:
 	RET
 
 ;-------------------------------------------------------------------------------
-; Second AY card (dual-card topology only). Must be a concrete port set.
+; Second card (dual-card topology only). AY cards give a TS second chip;
+; SAA1099 is accepted as the O-toggle alternate output (never a TS 2nd AY).
 ;-------------------------------------------------------------------------------
 TCFG_ASK_CARD2:
 TCFG_ASK_CARD2_0:
@@ -697,6 +699,8 @@ TCFG_ASK_CARD2_PR:
 	JR	Z, TCFG_ASK_C2_EB
 	CP	'C'
 	JR	Z, TCFG_ASK_C2_COLECO
+	CP	'S'
+	JR	Z, TCFG_ASK_C2_SAA
 	JR	TCFG_ASK_CARD2_0
 TCFG_ASK_CARD2_KEEP:
 	CALL	CRLF
@@ -724,6 +728,9 @@ TCFG_ASK_C2_EB:
 	JR	TCFG_ASK_C2_STORE
 TCFG_ASK_C2_COLECO:
 	LD	A, AY_CARD_COLECO
+	JR	TCFG_ASK_C2_STORE
+TCFG_ASK_C2_SAA:
+	LD	A, AY_CARD_SAA
 TCFG_ASK_C2_STORE:
 	LD	B, A
 	LD	A, (CFG_CARD1)
@@ -1930,9 +1937,9 @@ MSG_CFGTS:
 	.DB	"  TurboSound: ", 0
 MSG_CARD1MENU:
 	.DB	"Primary sound card? A=auto-detect, M=MSX ($A0/$A1), R=RC2014 ($D8/$D0),", 13, 10
-	.DB	" E=EB ($68/$60), C=Coleco ($50/$51), S=SAA1099 ($FF/$FE)", 0
+	.DB	" E=EB ($68/$60), C=Coleco ($50/$51), S=SAA1099 ($75/$74)", 0
 MSG_CARD2MENU:
-	.DB	"Second sound card (dual)? M=MSX, R=RC2014, E=EB, C=Coleco (must differ from primary)", 0
+	.DB	"Second sound card (dual)? M=MSX, R=RC2014, E=EB, C=Coleco, S=SAA1099 (O toggle only; must differ from primary)", 0
 MSG_CARDPROMPT:
 	.DB	"Choice [Enter keeps ", 0
 MSG_CARD_AUTO:

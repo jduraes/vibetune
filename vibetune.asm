@@ -487,8 +487,8 @@ START_EXIT_SILENCE_MODULE:
 ;   byte 4: cols (0 -> default 80)
 ;   byte 5: TS topology (0=auto, 1=dual-card, 2=module;
 ;           absent in old files -> auto)
-;   byte 6: primary AY card (0=auto, 1=MSX, 2=RC, 3=EB, 4=Coleco)
-;   byte 7: second AY card for dual-card (0=none, 1..4)
+;   byte 6: primary AY card (0=auto, 1=MSX, 2=RC, 3=EB, 4=Coleco, 5=SAA1099)
+;   byte 7: second card for dual-card (0=none, 1..4, 5=SAA as O alternate)
 ; Missing file or invalid magic → DISP_MODE stays DISP_PLAIN, cards auto.
 ; CLI (-msx/-rc/-eb/-coleco/-tsm) overrides CFG. No VT100/ANSI probing.
 ; Output: DISP_MODE is valid and stable for all subsequent display calls.
@@ -551,7 +551,9 @@ DETECT_DISP_COLS_OK:
 	LD	(TS_TOPOLOGY), A
 DETECT_DISP_CARDS:
 	; Bytes 6-7: AY cards (old files zero-filled → auto / none).
-	; Byte 6 also accepts 5 = SAA1099; byte 7 (dual-card second AY) does not.
+	; Byte 6 also accepts 5 = SAA1099; byte 7 accepts 5 too, but only as
+	; the O-toggle alternate output — never as a TS second AY
+	; (AY_CARD_TO_TS2 rejects it, so TS dual-card stays AY-only).
 	LD	A, (DMA_BUFFER+6)
 	CP	6
 	JR	C, DETECT_DISP_C1_OK
@@ -559,7 +561,7 @@ DETECT_DISP_CARDS:
 DETECT_DISP_C1_OK:
 	LD	(CFG_AY_CARD1), A
 	LD	A, (DMA_BUFFER+7)
-	CP	5
+	CP	6
 	JR	C, DETECT_DISP_C2_OK
 	XOR	A
 DETECT_DISP_C2_OK:
@@ -3165,8 +3167,10 @@ MAIN_REDRAW_PAUSED:
 ; Hardware: description, and queues a deferred status note (printed after
 ; WAITQ, so no console I/O before the frame delay). Song position is
 ; untouched: the same AY register image just routes to the other chip.
-; The SAA is write-only (no presence test), so AY->SAA is always allowed;
-; SAA->AY requires an AY source found at startup (OUT_AY_AV = 0).
+; Both sides must be "known": the SAA is write-only (no presence test), so
+; it counts only when explicitly configured (-saa / VTUNE.CFG card 5);
+; the AY side needs an AY source found at startup (OUT_AY_AV = 0).
+; Otherwise O prints "no alternate output available" and changes nothing.
 ; TurboSound: dual AY cards -> one SAA playing 3+3 (topology forced to the
 ; module plumbing while SAAMD=1, restored on the way back).
 MAIN_OUTPUT_TOGGLE:
@@ -3192,7 +3196,11 @@ MAIN_OUT_TO_AY1:
 	LD	A, STATUS_OUT_AY
 	JR	MAIN_OUT_DONE
 MAIN_OUT_TO_SAA:
-	; AY -> SAA1099 (always allowed; see header note)
+	; AY -> SAA1099: only when the SAA was explicitly configured
+	; (-saa / VTUNE.CFG card 5) — it is write-only, no presence test.
+	LD	A, (OUT_SAA_AV)
+	OR	A
+	JR	NZ, MAIN_OUT_NONE
 	CALL	START_EXIT_SILENCE	; SAAMD=0: AY/TS-aware mute
 	LD	A, 1
 	LD	(SAAMD), A
@@ -4001,6 +4009,7 @@ PTX_TS_NEXT:
 ; Priority: 1) CLI (-msx/-rc/-eb/-coleco)  2) VTUNE.CFG primary card
 ;           3) HBIOS  4) probe  5) MSX default
 DETECT_HARDWARE_CONFIG:
+	CALL	OUT_COMPUTE_SAA_AV
 	LD	A, (SAAMD)
 	OR	A
 	JR	NZ, DETECT_HW_SAA
@@ -4097,6 +4106,27 @@ DETECT_HW_FALLBACK:
 	CALL	SET_CONFIG_MSX
 	CALL	APPLY_Z180_FOR_PLATFORM	; MSX ports on Z180 still need DCNTL slow-I/O
 	XOR	A
+	RET
+
+; The SAA1099 is write-only — it cannot be probed, so for the O toggle it
+; counts as "known" only when explicitly configured: -saa (SAAMD), or
+; VTUNE.CFG primary/secondary card 5.  Sets OUT_SAA_AV: 0 = known.
+OUT_COMPUTE_SAA_AV:
+	LD	A, (CFG_AY_CARD1)
+	CP	HW_MODE_SAA
+	JR	Z, OCS_KNOWN
+	LD	A, (CFG_AY_CARD2)
+	CP	HW_MODE_SAA
+	JR	Z, OCS_KNOWN
+	LD	A, (SAAMD)
+	OR	A
+	JR	NZ, OCS_KNOWN
+	LD	A, 1
+	LD	(OUT_SAA_AV), A
+	RET
+OCS_KNOWN:
+	XOR	A
+	LD	(OUT_SAA_AV), A
 	RET
 
 ; Apply VTUNE.CFG primary card when non-zero. Same IDs as HW_MODE_*.
@@ -5088,6 +5118,8 @@ ALT_HW_DESC:
 	.DW	HWSTR_SAA		; 'other chip' description (O toggle; SAA in AY mode)
 OUT_AY_AV:
 	.DB	0			; SAA mode: 0 = an AY source was found at startup
+OUT_SAA_AV:
+	.DB	1			; 0 = SAA explicitly configured (-saa / CFG card 5)
 OUT_SAVED_TOPO:
 	.DB	$FF			; AY TS topology saved across an AY->SAA toggle
 FORCED_DLY_HWTIMER:
