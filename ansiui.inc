@@ -408,9 +408,7 @@ UI_SHOW_LOOP_STATUS:
 	LD	A, (CFG_ROWS)
 	CP	B
 	RET	C
-	CALL	UI_CLR_ROW
-	LD	C, 1
-	CALL	TCFG_ANSI_AT
+	CALL	UI_CLR_ROW_HOME
 	LD	DE, MSG_LOOPSTAT
 	CALL	PRTSTR
 	LD	A, (LOOP_MODE)
@@ -479,9 +477,7 @@ UI_DRAW_STATE_BODY:
 	CALL	UI_FOOTER_STATE_ROW
 	POP	AF
 	RET	C
-	CALL	UI_CLR_ROW
-	LD	C, 1
-	CALL	TCFG_ANSI_AT
+	CALL	UI_CLR_ROW_HOME
 	OR	A
 	CALL	NZ, TCFG_COL_PRM
 	CALL	Z, TCFG_COL_OK
@@ -672,22 +668,12 @@ PRINT_SONG_META_PLAIN:
 	LD	DE, MSG_SONGNAME
 	CALL	PRTSTR
 	LD	HL, METATITLE
-	LD	B, $20
-PSM_PLAIN1:
-	LD	A, (HL)
-	INC	HL
-	CALL	PRTCHR
-	DJNZ	PSM_PLAIN1
+	CALL	UI_PRT_META32
 	CALL	CRLF
 	LD	DE, MSG_ARTIST
 	CALL	PRTSTR
 	LD	HL, METAARTIST
-	LD	B, $20
-PSM_PLAIN2:
-	LD	A, (HL)
-	INC	HL
-	CALL	PRTCHR
-	DJNZ	PSM_PLAIN2
+	CALL	UI_PRT_META32
 	JP	CRLF
 
 ;-------------------------------------------------------------------------------
@@ -785,6 +771,13 @@ UI_CLR_ROW:
 	POP	BC
 	POP	AF
 	RET
+
+; Clear row B, then leave the cursor at row B, column 1 (UI_CLR_ROW
+; preserves BC, so B still holds the row).
+UI_CLR_ROW_HOME:
+	CALL	UI_CLR_ROW
+	LD	C, 1
+	JP	TCFG_ANSI_AT
 
 ;-------------------------------------------------------------------------------
 ; Low-level ANSI emitters (only called on UI-active paths)
@@ -1316,7 +1309,7 @@ UI_ESC_NAV_DONE:
 ;-------------------------------------------------------------------------------
 
 MSG_PLKEYS:
-	.DB	"Keys: Esc=quit, Space=pause, Enter=play, N/P=track, WASD=nav, (O)utput, (R)edraw, (l/L)oop trk/plist", 0
+	.DB	"Keys: Esc quit, Spc pause, Enter play, N/P track, WASD/arrows nav, Delx3 del, R redraw, l/L loop, O AY/SAA", 0
 MSG_LOOPSTAT:
 	.DB	"Looping Status: ", 0
 MSG_SONGNAME:

@@ -245,6 +245,8 @@ START_HELP:
 	CALL	PRINT_BANNER
 	CALL	PRINT_USAGE
 	LD	DE, MSG_HELP_TEXT
+	CALL	PRTSTR
+	LD	DE, MSG_PLKEYS
 	JP	EXIT_MSG
 
 ; Attribution lives here only (not on the plain usage screen).
@@ -262,8 +264,7 @@ START_TOO_MANY:
 	CALL	PRINT_BANNER
 	CALL	PRTERR
 	LD	DE, MSG_ERR_TOO_MANY
-	CALL	PRTSTR
-	CALL	CRLF
+	CALL	PRSTRL
 	CALL	PRINT_USAGE
 	JP	START_EXIT
 
@@ -274,11 +275,8 @@ START_UNKNOWN_SWITCH:
 	LD	DE, ARG_SCRATCH		; bad token left by validator
 	CALL	PRTSTR
 	LD	DE, MSG_ERR_UNKNOWN_SWITCH_SFX
-	CALL	PRTSTR
-	CALL	CRLF
-	LD	DE, MSG_USAGE_SWITCHES
-	CALL	PRTSTR
-	CALL	CRLF
+	CALL	PRSTRL
+	CALL	PRINT_SWITCH_LIST
 	JP	START_EXIT
 
 PRINT_BANNER:
@@ -289,11 +287,8 @@ PRINT_BANNER:
 
 PRINT_USAGE:
 	LD	DE, MSG_USAGE
-	CALL	PRTSTR
-	CALL	CRLF
-	LD	DE, MSG_USAGE_SWITCHES
-	CALL	PRTSTR
-	CALL	CRLF
+	CALL	PRSTRL
+	CALL	PRINT_SWITCH_LIST
 	RET
 
 ; Print the shared "Error: " prefix. DE preserved for the message that follows.
@@ -310,8 +305,7 @@ EXIT_ERR:
 	; fall through to EXIT_MSG
 ; Message exit: print string at DE + CRLF, then exit to CP/M.
 EXIT_MSG:
-	CALL	PRTSTR
-	CALL	CRLF
+	CALL	PRSTRL
 	JP	START_EXIT
 
 ; -loop was parsed before the run mode was known; resolve LOOP_MODE now.
@@ -385,24 +379,15 @@ START_LOAD_SHOW_PLAIN:
 	CALL	CRLF
 	CALL	PRINT_SONG_META_PLAIN
 	CALL	PRINT_PLAYBACK_HW_CONFIG
-	LD	A, (PLAY_STATE)
-	CP	PLAY_PAUSED
-	JR	Z, START_LOAD_SHOW_PAUSED
-	LD	DE, MSG_STATE_PLAYING
-	JR	START_LOAD_SHOW_STATE
-START_LOAD_SHOW_PAUSED:
-	LD	DE, MSG_STATE_PAUSED
-START_LOAD_SHOW_STATE:
-	CALL	PRTSTR
-	CALL	CRLF
+	CALL	GET_STATE_MSG
+	CALL	PRSTRL
 	JP	MAIN_LOOP
 
 START_SCAN:
 	CALL	UI_ACTIVE_TEST		; UI_SETUP already ran after DETECT_DISPLAY_MODE
 	JR	NZ, START_SCAN_UI
 	LD	DE, MSG_SCANNING
-	CALL	PRTSTR
-	CALL	CRLF
+	CALL	PRSTRL
 	CALL	SCAN_TRACKS
 	LD	DE, MSG_TRACKS_FOUND
 	CALL	PRTSTR
@@ -435,8 +420,7 @@ START_EXIT_MSG:
 	OR	A
 	JR	Z, START_EXIT_DONE
 	LD	DE, MSG_EXITING
-	CALL	PRTSTR
-	CALL	CRLF
+	CALL	PRSTRL
 START_EXIT_DONE:
 	; Drop keys that arrived during "Done..." / ANSI teardown (fn 6
 	; only — same path as input; never CONST, which fills kbchar).
@@ -680,74 +664,38 @@ SCAN_SWITCH_FCB:
 	JP	STRINDEX_UP_LEN
 
 ; Scan command line for switches (any token order). Primary: $0081 like tune.com.
+; Table-driven: each entry is token ptr, target var ptr, value.
 SCAN_CMDLINE_SWITCHES:
-	LD	DE, MSG_SWITCH_LIST
-	CALL	SCAN_SWITCH_IN_CMD
-	JR	NZ, SCAN_SW_NO_LIST
-	LD	A, RUNMODE_LIST
-	LD	(RUN_MODE), A
-SCAN_SW_NO_LIST:
-	LD	DE, MSG_SWITCH_HELP
-	CALL	SCAN_SWITCH_IN_CMD
-	JR	NZ, SCAN_SW_NO_HELP
-	LD	A, RUNMODE_HELP
-	LD	(RUN_MODE), A
-SCAN_SW_NO_HELP:
-	LD	DE, MSG_SWITCH_CREDITS
-	CALL	SCAN_SWITCH_IN_CMD
-	JR	NZ, SCAN_SW_NO_CREDITS
-	LD	A, RUNMODE_CREDITS
-	LD	(RUN_MODE), A
-SCAN_SW_NO_CREDITS:
-	LD	DE, MSG_SWITCH_LOOP
-	CALL	SCAN_SWITCH_IN_CMD
-	JR	NZ, SCAN_SW_NO_LOOP
-	LD	A, 1
-	LD	(LOOP_REQ), A		; applied once run mode is known
-SCAN_SW_NO_LOOP:
-	LD	DE, MSG_SWITCH_MSX
-	CALL	SCAN_SWITCH_IN_CMD
-	JR	NZ, SCAN_SW_NO_MSX
-	LD	A, HW_MODE_MSX
-	LD	(HW_DETECT_MODE), A
-SCAN_SW_NO_MSX:
-	LD	DE, MSG_SWITCH_RC
-	CALL	SCAN_SWITCH_IN_CMD
-	JR	NZ, SCAN_SW_NO_RC
-	LD	A, HW_MODE_RC
-	LD	(HW_DETECT_MODE), A
-SCAN_SW_NO_RC:
-	LD	DE, MSG_SWITCH_COLECO
-	CALL	SCAN_SWITCH_IN_CMD
-	JR	NZ, SCAN_SW_NO_COLECO
-	LD	A, HW_MODE_COLECO
-	LD	(HW_DETECT_MODE), A
-SCAN_SW_NO_COLECO:
-	LD	DE, MSG_SWITCH_EB
-	CALL	SCAN_SWITCH_IN_CMD
-	JR	NZ, SCAN_SW_NO_EB
-	LD	A, HW_MODE_EB
-	LD	(HW_DETECT_MODE), A
-SCAN_SW_NO_EB:
-	LD	DE, MSG_SWITCH_DELAY
-	CALL	SCAN_SWITCH_IN_CMD
-	JR	NZ, SCAN_SW_NO_DELAY
-	LD	A, 1
-	LD	(DELAYMD), A
-SCAN_SW_NO_DELAY:
-	LD	DE, MSG_SWITCH_TSM
-	CALL	SCAN_SWITCH_IN_CMD
-	JR	NZ, SCAN_SW_NO_TSM
-	LD	A, TS_TOPO_MODULE
-	LD	(TS_TOPOLOGY), A
-SCAN_SW_NO_TSM:
-	LD	DE, MSG_SWITCH_SAA
-	CALL	SCAN_SWITCH_IN_CMD
-	JR	NZ, SCAN_SW_DONE
-	LD	A, 1
-	LD	(SAAMD), A		; SAA1099 direct I/O backend
-SCAN_SW_DONE:
-	RET
+	LD	BC, SCAN_SW_TABLE
+SCAN_SW_LOOP:
+	LD	A, (BC)
+	LD	E, A
+	INC	BC
+	LD	A, (BC)
+	LD	D, A
+	INC	BC
+	LD	A, D
+	OR	E
+	RET	Z			; end of table
+	PUSH	BC
+	CALL	SCAN_SWITCH_IN_CMD	; DE=token; Z if present
+	POP	BC
+	JR	NZ, SCAN_SW_NEXT
+	LD	A, (BC)		; var ptr -> HL
+	LD	L, A
+	INC	BC
+	LD	A, (BC)
+	LD	H, A
+	INC	BC
+	LD	A, (BC)		; value
+	INC	BC
+	LD	(HL), A
+	JR	SCAN_SW_LOOP
+SCAN_SW_NEXT:
+	INC	BC
+	INC	BC
+	INC	BC
+	JR	SCAN_SW_LOOP
 
 ; Z = 1 if A is NUL, CR, or CP/M end-of-line (high bit set on last byte).
 CMD_CHAR_END:
@@ -1044,41 +992,45 @@ APPLY_IF_SWITCH_Y:
 
 ; HL = NUL-terminated token. Z (A=0) if it exactly matches a known switch.
 IS_KNOWN_SWITCH_TOKEN:
-	LD	DE, MSG_SWITCH_LIST
+	LD	BC, SWITCH_TOKEN_TABLE
+IS_KNOWN_SW_LOOP:
+	LD	A, (BC)
+	LD	E, A
+	INC	BC
+	LD	A, (BC)
+	LD	D, A
+	INC	BC
+	OR	E
+	JR	Z, IS_KNOWN_SW_NO
+	PUSH	BC
 	CALL	SWITCH_TOKEN_EQ
+	POP	BC
 	RET	Z
-	LD	DE, MSG_SWITCH_HELP
-	CALL	SWITCH_TOKEN_EQ
-	RET	Z
-	LD	DE, MSG_SWITCH_CREDITS
-	CALL	SWITCH_TOKEN_EQ
-	RET	Z
-	LD	DE, MSG_SWITCH_LOOP
-	CALL	SWITCH_TOKEN_EQ
-	RET	Z
-	LD	DE, MSG_SWITCH_MSX
-	CALL	SWITCH_TOKEN_EQ
-	RET	Z
-	LD	DE, MSG_SWITCH_RC
-	CALL	SWITCH_TOKEN_EQ
-	RET	Z
-	LD	DE, MSG_SWITCH_COLECO
-	CALL	SWITCH_TOKEN_EQ
-	RET	Z
-	LD	DE, MSG_SWITCH_EB
-	CALL	SWITCH_TOKEN_EQ
-	RET	Z
-	LD	DE, MSG_SWITCH_DELAY
-	CALL	SWITCH_TOKEN_EQ
-	RET	Z
-	LD	DE, MSG_SWITCH_TSM
-	CALL	SWITCH_TOKEN_EQ
-	RET	Z
-	LD	DE, MSG_SWITCH_SAA
-	CALL	SWITCH_TOKEN_EQ
-	RET	Z
+	JR	IS_KNOWN_SW_LOOP
+IS_KNOWN_SW_NO:
 	OR	$FF
 	RET
+
+; Print "Valid switches: " + the table tokens, space-separated, then CRLF.
+PRINT_SWITCH_LIST:
+	LD	DE, MSG_VALID_SW
+	CALL	PRTSTR
+	LD	BC, SWITCH_TOKEN_TABLE
+PRINT_SW_LOOP:
+	LD	A, (BC)
+	LD	E, A
+	INC	BC
+	LD	A, (BC)
+	LD	D, A
+	INC	BC
+	OR	E
+	JP	Z, CRLF
+	PUSH	BC
+	CALL	PRTSTR
+	LD	A, ' '
+	CALL	PRTCHR
+	POP	BC
+	JR	PRINT_SW_LOOP
 
 ; Exact case-insensitive match of token HL to needle DE (both must end together).
 ; Z if equal. Preserves HL. Clobbers AF/BC/DE.
@@ -1910,8 +1862,7 @@ PRINT_TRACK_UNSEL:
 PRINT_TRACK_NAME:
 	LD	D, H
 	LD	E, L
-	CALL	PRTSTR
-	CALL	CRLF
+	CALL	PRSTRL
 	POP	HL
 	LD	DE, TRACK_NAME_LEN
 	ADD	HL, DE
@@ -2413,10 +2364,10 @@ TS_DESC_MSX:
 	LD	DE, HW_DESC_MSX
 	RET
 TS_DESC_COLECO:
-	LD	DE, TSSTR_COLECO
+	LD	DE, HW_DESC_COLECO
 	RET
 TS_DESC_RC:
-	LD	DE, TSSTR_RC
+	LD	DE, HW_DESC_EB_RC
 	RET
 TS_DESC_EB:
 	LD	DE, HW_DESC_EB_Z180
@@ -3009,9 +2960,7 @@ MAIN_DEL_PROMPT:
 	JR	Z, MAIN_DEL_PROMPT_PLAIN
 	CALL	UI_FOOTER_STATE_ROW
 	JR	C, MAIN_DEL_PROMPT_PLAIN
-	CALL	UI_CLR_ROW
-	LD	C, 1
-	CALL	TCFG_ANSI_AT
+	CALL	UI_CLR_ROW_HOME
 	CALL	TCFG_COL_PRM
 	JR	MAIN_DEL_PROMPT2
 MAIN_DEL_PROMPT_PLAIN:
@@ -3054,9 +3003,7 @@ MAIN_DEL_YES:
 	CALL	TCFG_COL_RST
 	CALL	UI_FOOTER_STATE_ROW
 	JR	C, MAIN_DEL_YES_PLAIN
-	CALL	UI_CLR_ROW
-	LD	C, 1
-	CALL	TCFG_ANSI_AT
+	CALL	UI_CLR_ROW_HOME
 	JR	MAIN_DEL_YES2
 MAIN_DEL_YES_PLAIN:
 	CALL	CRLF
@@ -3103,16 +3050,8 @@ MAIN_DEL_REDRAW_STATUS:
 	JP	Z, UI_STATUS_PAUSED
 	JP	UI_STATUS_PLAYING
 MAIN_DEL_RS_PLAIN:
-	LD	A, (PLAY_STATE)
-	CP	PLAY_PAUSED
-	JR	Z, MAIN_DEL_RS_P
-	LD	DE, MSG_STATE_PLAYING
-	JR	MAIN_DEL_RS_E
-MAIN_DEL_RS_P:
-	LD	DE, MSG_STATE_PAUSED
-MAIN_DEL_RS_E:
-	CALL	PRTSTR
-	JP	CRLF
+	CALL	GET_STATE_MSG
+	JP	PRSTRL
 
 ; Matrix navigation: marker == current track, a move switches tracks.
 MAIN_NAV_UP:
@@ -3128,11 +3067,8 @@ MAIN_NAV_RIGHT:
 	CALL	UI_NAV_RIGHT
 MAIN_NAV_GO:
 	LD	(UI_IDXTMP), A		; UI_NAV_* clobber C; park the index
-	CALL	TRACK_COUNT_TEST
+	CALL	NAV_PREP
 	JP	Z, MAIN_LOOP_NODELAY
-	CALL	NAV_SAVE_IF_IDLE
-	LD	A, (TRACK_SELECTED)
-	LD	(TRACK_OLD), A
 	LD	A, (UI_IDXTMP)
 	LD	(TRACK_SELECTED), A
 	JP	MAIN_NAV_RELOAD_OR_DEFER
@@ -3313,11 +3249,8 @@ MAIN_ENTER_PLAY_RELOAD:
 	JP	MAIN_RELOAD_TRACK
 
 MAIN_NEXT:
-	CALL	TRACK_COUNT_TEST
+	CALL	NAV_PREP
 	JP	Z, MAIN_LOOP_NODELAY
-	CALL	NAV_SAVE_IF_IDLE	; don't clobber PLAY_PLAYING mid-settle
-	LD	A, (TRACK_SELECTED)
-	LD	(TRACK_OLD), A
 	INC	A
 	LD	HL, TRACK_COUNT
 	CP	(HL)
@@ -3328,11 +3261,8 @@ MAIN_NEXT_OK:
 	JP	MAIN_NAV_RELOAD_OR_DEFER
 
 MAIN_PREV:
-	CALL	TRACK_COUNT_TEST
+	CALL	NAV_PREP
 	JP	Z, MAIN_LOOP_NODELAY
-	CALL	NAV_SAVE_IF_IDLE	; don't clobber PLAY_PLAYING mid-settle
-	LD	A, (TRACK_SELECTED)
-	LD	(TRACK_OLD), A
 	OR	A
 	JR	NZ, MAIN_PREV_DEC
 	LD	A, (TRACK_COUNT)
@@ -3353,6 +3283,16 @@ NAV_SAVE_IF_IDLE:
 	RET	NZ
 	LD	A, (PLAY_STATE)
 	LD	(NAV_SAVED_STATE), A
+	RET
+
+; Nav-key preamble: Z when no tracks (caller jumps to MAIN_LOOP_NODELAY);
+; otherwise saves play state if idle and snapshots TRACK_SELECTED to TRACK_OLD.
+NAV_PREP:
+	CALL	TRACK_COUNT_TEST
+	RET	Z
+	CALL	NAV_SAVE_IF_IDLE
+	LD	A, (TRACK_SELECTED)
+	LD	(TRACK_OLD), A
 	RET
 
 ; Track selected by a manual nav key (arrows / WASD / N/P).
@@ -3666,9 +3606,7 @@ PDS_OUT_NONE:
 	; UI: show the note on the State footer row (next state change rewrites it)
 	CALL	UI_FOOTER_STATE_ROW
 	RET	C
-	CALL	UI_CLR_ROW
-	LD	C, 1
-	CALL	TCFG_ANSI_AT
+	CALL	UI_CLR_ROW_HOME
 	LD	DE, MSG_OUT_NONE
 	CALL	PRTSTR
 	JP	UI_CURSOR_ON_SELECTED
@@ -3796,16 +3734,8 @@ MAIN_RELOAD_STATE_OK:
 	CALL	CRLF
 	CALL	PRINT_SONG_META_PLAIN
 	CALL	PRINT_PLAYBACK_HW_CONFIG
-	LD	A, (PLAY_STATE)
-	CP	PLAY_PAUSED
-	JR	Z, MAIN_RELOAD_SHOW_PAUSED
-	LD	DE, MSG_STATE_PLAYING
-	JR	MAIN_RELOAD_SHOW_STATE
-MAIN_RELOAD_SHOW_PAUSED:
-	LD	DE, MSG_STATE_PAUSED
-MAIN_RELOAD_SHOW_STATE:
-	CALL	PRTSTR
-	CALL	CRLF
+	CALL	GET_STATE_MSG
+	CALL	PRSTRL
 	JP	MAIN_LOOP
 
 ; Copy TRACK_SELECTED entry from TRACK_LIST to ARG_BUFFER.
@@ -4454,62 +4384,71 @@ RESTORE_PLAY_PSG_PORTS:
 	LD	(PSG_DATA_PORT), A
 	RET
 
-SET_CONFIG_MSX:
-	LD	A, $A0
-	LD	(PSG_REG_PORT), A
-	LD	A, $A1
+; Configuration setters: table-driven. Table entry: data port, reg port,
+; chip-2 data port, chip-2 reg port, description pointer, Z180_IO_BASE
+; ($FF = leave unchanged; MSX chip 2 uses the next port pair $A2/$A3).
+; Do not force Z180_IO_BASE=$FF in the common path: MSX-addressed cards on
+; SCZ180/RCZ180 still need DCNTL slow-I/O. Caller applies
+; APPLY_Z180_FOR_PLATFORM / CAPTURE_PLATFORM_Z180 once the platform id is known.
+SET_CONFIG_TBL_HL:
+	PUSH	DE			; originals clobbered only A/HL; keep that contract
+	LD	A, (HL)
 	LD	(PSG_DATA_PORT), A
-	LD	A, $A2
+	INC	HL
+	LD	A, (HL)
+	LD	(PSG_REG_PORT), A
+	INC	HL
+	LD	A, (HL)
 	LD	(PSG2_DATA_PORT), A
-	LD	A, $A3
+	INC	HL
+	LD	A, (HL)
 	LD	(PSG2_REG_PORT), A
-	; Do not force Z180_IO_BASE=$FF here: MSX-addressed cards on SCZ180/RCZ180
-	; still need DCNTL slow-I/O. Caller applies APPLY_Z180_FOR_PLATFORM /
-	; CAPTURE_PLATFORM_Z180 once the platform id is known.
-	LD	HL, HW_DESC_MSX
-	LD	(HW_CONFIG_DESC), HL
+	INC	HL
+	LD	E, (HL)
+	INC	HL
+	LD	D, (HL)
+	INC	HL
+	LD	(HW_CONFIG_DESC), DE
+	LD	A, (HL)
+	CP	$FF
+	JR	Z, SET_CONFIG_TBL_DONE
+	LD	(Z180_IO_BASE), A
+SET_CONFIG_TBL_DONE:
+	POP	DE
 	JP	SNAPSHOT_PLAY_PSG_PORTS
+
+SET_CONFIG_MSX:
+	LD	HL, SET_CONFIG_TBL_MSX
+	JR	SET_CONFIG_TBL_HL
 
 SET_CONFIG_RC:
-	LD	A, $D0
-	LD	(PSG_DATA_PORT), A
-	LD	A, $D8
-	LD	(PSG_REG_PORT), A
-	LD	A, $D0
-	LD	(PSG2_DATA_PORT), A
-	LD	A, $D8
-	LD	(PSG2_REG_PORT), A
-	LD	HL, HW_DESC_EB_RC
-	LD	(HW_CONFIG_DESC), HL
-	JP	SNAPSHOT_PLAY_PSG_PORTS
+	LD	HL, SET_CONFIG_TBL_RC
+	JR	SET_CONFIG_TBL_HL
 
 SET_CONFIG_EB_Z180:
-	LD	A, $60
-	LD	(PSG_DATA_PORT), A
-	LD	A, $68
-	LD	(PSG_REG_PORT), A
-	LD	A, $60
-	LD	(PSG2_DATA_PORT), A
-	LD	A, $68
-	LD	(PSG2_REG_PORT), A
-	LD	A, $C0
-	LD	(Z180_IO_BASE), A
-	LD	HL, HW_DESC_EB_Z180
-	LD	(HW_CONFIG_DESC), HL
-	JP	SNAPSHOT_PLAY_PSG_PORTS
+	LD	HL, SET_CONFIG_TBL_EB
+	JR	SET_CONFIG_TBL_HL
 
 SET_CONFIG_COLECO:
-	LD	A, $50
-	LD	(PSG_DATA_PORT), A
-	LD	A, $51
-	LD	(PSG_REG_PORT), A
-	LD	A, $50
-	LD	(PSG2_DATA_PORT), A
-	LD	A, $51
-	LD	(PSG2_REG_PORT), A
-	LD	HL, HW_DESC_COLECO
-	LD	(HW_CONFIG_DESC), HL
-	JP	SNAPSHOT_PLAY_PSG_PORTS
+	LD	HL, SET_CONFIG_TBL_COLECO
+	JR	SET_CONFIG_TBL_HL
+
+SET_CONFIG_TBL_MSX:
+	.DB	$A1, $A0, $A2, $A3
+	.DW	HW_DESC_MSX
+	.DB	$FF
+SET_CONFIG_TBL_RC:
+	.DB	$D0, $D8, $D0, $D8
+	.DW	HW_DESC_EB_RC
+	.DB	$FF
+SET_CONFIG_TBL_EB:
+	.DB	$60, $68, $60, $68
+	.DW	HW_DESC_EB_Z180
+	.DB	$C0
+SET_CONFIG_TBL_COLECO:
+	.DB	$50, $51, $50, $51
+	.DW	HW_DESC_COLECO
+	.DB	$FF
 
 ; True (A!=0) if port A lies in the Z180 internal I/O window
 ; [Z180_IO_BASE, Z180_IO_BASE+3Fh]. A=0 if no Z180 or port is safe.
@@ -4545,8 +4484,7 @@ SANITIZE_AY_PORTS:
 	RET	Z
 SANITIZE_AY_ABORT:
 	LD	DE, MSG_Z180_WARN
-	CALL	PRTSTR
-	CALL	CRLF
+	CALL	PRSTRL
 	; Park ports outside the Z180 window so exit mute cannot hit TCR/etc.
 	XOR	A
 	LD	(TSFLAG), A
@@ -4860,6 +4798,22 @@ CRLF:
 	POP	AF
 	RET
 
+; Print the zero-terminated string at DE, then CRLF. Same clobbers as
+; PRTSTR + CRLF (both preserve AF).
+PRSTRL:
+	CALL	PRTSTR
+	JP	CRLF
+
+; DE = MSG_STATE_PLAYING, or MSG_STATE_PAUSED when PLAY_STATE = PLAY_PAUSED.
+; Clobbers A/DE only.
+GET_STATE_MSG:
+	LD	A, (PLAY_STATE)
+	CP	PLAY_PAUSED
+	LD	DE, MSG_STATE_PLAYING
+	RET	NZ
+	LD	DE, MSG_STATE_PAUSED
+	RET
+
 ; BDOS tail-call helpers: end in JP BDOS so BDOS return values (A etc.)
 ; pass straight through to the caller.
 BDOS_DMA_DEFAULT:
@@ -4891,41 +4845,35 @@ MSG_BANNER:
 MSG_CFG_NAME:
 	.DB	"VTUNE   CFG"
 MSG_CREDITS:
-	.DB	"Copyright (C) 2026, Joao Miguel Duraes (fackie)", 13, 10, 13, 10
+	.DB	"Copyright (C) 2026, Joao Miguel Duraes (fackie), GNU GPL v3+", 13, 10
 	.DB	"Derivative work from:", 13, 10
-	.DB	"RomWBW tune.com Copyright (C) 2026, Wayne Warthen, GNU GPL v3", 13, 10
-	.DB	"PTxPlayer Copyright (C) 2004-2007, S.V.Bulba", 13, 10
+	.DB	"RomWBW tune.com (C) 2026, Wayne Warthen (GPL v3)", 13, 10
+	.DB	"PTxPlayer (C) 2004-2007, S.V.Bulba", 13, 10
 #IFDEF MYM
 	.DB	"MYMPlay by Marq/Lieves!Tuore"
 #ENDIF
 	.DB	0
 MSG_HELP_TEXT:
 	.DB	13, 10
-	.DB	"  -help     Show this help", 13, 10
-	.DB	"  -credits  Show copyright and attribution", 13, 10
-	.DB	"  -list     Playlist mode: play all PT2/PT3"
+	.DB	"  -help     this help", 13, 10
+	.DB	"  -credits  copyright/attribution", 13, 10
+	.DB	"  -list     play all PT2/PT3"
 #IFDEF MYM
 	.DB	"/MYM"
 #ENDIF
-	.DB	" on the current drive", 13, 10
-	.DB	"  -loop     Loop playback: playlist in -list mode, single track otherwise", 13, 10
-	.DB	"  -delay    Force delay-loop timing instead of the HBIOS hardware timer", 13, 10
-	.DB	"  -msx      Force MSX standard PSG ports ($A0/$A1)", 13, 10
-	.DB	"  -rc       Force RC2014 standard PSG ports ($D8/$D0)", 13, 10
-	.DB	"  -coleco   Force Coleco PSG ports ($50/$51)", 13, 10
-	.DB	"  -eb       Force Ed Brindley (EB) sound module ports ($68/$60)", 13, 10
-	.DB	"  -tsm      Force TurboSound dual-AVR module mode (0xFF/0xFE); auto if Hi-Z", 13, 10
-	.DB	"  -saa      Play via SAA1099 card (direct I/O, ports 0x75/0x74)", 13, 10, 13, 10
-	.DB	"Playlist keys: Esc=quit, Space=pause, Enter=play (when paused), N/P=track,", 13, 10
-	.DB	"  WASD/arrows=nav, Delx3=delete, R=redraw, l/L=loop track/playlist,", 13, 10
-	.DB	"  O=toggle AY<->SAA1099 output", 0
+	.DB	" on current drive", 13, 10
+	.DB	"  -loop     loop playlist (-list) or track", 13, 10
+	.DB	"  -delay    delay-loop timing (no HBIOS timer)", 13, 10
+	.DB	"  -msx/-rc/-coleco/-eb  force PSG ports:", 13, 10
+	.DB	"            MSX $A0/$A1, RC2014 $D8/$D0, Coleco $50/$51, EB $68/$60", 13, 10
+	.DB	"  -tsm      TurboSound dual-AVR module (FF/FE)", 13, 10
+	.DB	"  -saa      SAA1099 card ($75/$74)", 13, 10, 13, 10
+	.DB	0
 MSG_Z180_WARN:
-	.DB	"Cannot use these AY ports on this Z180 machine.", 13, 10, 13, 10
-	.DB	"  $D0/$D8 (-rc) overlap the Z180 internal I/O window", 13, 10
-	.DB	"  (RomWBW Z180_IO_BASE, usually $C0 on SC126).", 13, 10, 13, 10
-	.DB	"Reconfigure the sound card, then retry:", 13, 10, 13, 10
-	.DB	"  Rev5:  EB addressing  $60/$68  (vtune -eb)", 13, 10
-	.DB	"  Rev6.1: MSX $A0/$A1 (vtune -msx) or Coleco $50/$51 (-coleco)", 13, 10, 13, 10
+	.DB	"Cannot use AY ports $D0/$D8 (-rc) on this Z180:", 13, 10
+	.DB	"they overlap the Z180 internal I/O window", 13, 10
+	.DB	"(Z180_IO_BASE, usually $C0 on SC126).", 13, 10, 13, 10
+	.DB	"Use -eb (Rev5 $60/$68) or -msx/-coleco (Rev6.1).", 13, 10
 	.DB	"Aborting.", 0
 ; Field prefixes, padded so values align at column 12 (see also ansiui.inc).
 MSG_INPUT:
@@ -4943,13 +4891,9 @@ MSG_HW_DUAL:
 MSG_HW_SEP:
 	.DB	" / ", 0
 MSG_HW_AVR_TAG:
-	.DB	" - TurboSound 0xFF/0xFE chip select in use", 0
+	.DB	" - TurboSound FF/FE chip select in use", 0
 MSG_HW_SAA_TS:
-	.DB	" - TurboSound 3+3 channels on one SAA1099", 0
-TSSTR_COLECO:
-	.DB	"Coleco AY ($50H/$51H)", 0
-TSSTR_RC:
-	.DB	"RC2014 standard ($D8H/$D0H)", 0
+	.DB	" - TurboSound 3+3 on one SAA1099", 0
 TSSTR_UNKNOWN:
 	.DB	"Unknown AY port set", 0
 MSG_STATE_PLAYING:
@@ -4974,7 +4918,7 @@ MSG_LOOPSTAT_OFF	.EQU	MSG_LOOP_OFF + 11
 MSG_LOOPSTAT_TRK	.EQU	MSG_LOOP_TRACK + 11
 MSG_LOOPSTAT_PL	.EQU	MSG_LOOP_PLAYLIST + 11
 MSG_DEL_Q1:
-	.DB	"Are you sure you want to delete ", 0
+	.DB	"Delete ", 0
 MSG_DEL_Q2:
 	.DB	"? (Y/N)", 0
 MSG_DELING:
@@ -4989,8 +4933,40 @@ MSG_USAGE:
 	.DB	"|.mym"
 #ENDIF
 	.DB	"]", 0
-MSG_USAGE_SWITCHES:
-	.DB	"Valid switches: -help -credits -list -loop -delay -msx -rc -coleco -eb -tsm -saa", 0
+MSG_VALID_SW:
+	.DB	"Valid switches: ", 0
+SWITCH_TOKEN_TABLE:
+	.DW	MSG_SWITCH_LIST, MSG_SWITCH_HELP, MSG_SWITCH_CREDITS
+	.DW	MSG_SWITCH_LOOP, MSG_SWITCH_MSX, MSG_SWITCH_RC
+	.DW	MSG_SWITCH_COLECO, MSG_SWITCH_EB, MSG_SWITCH_DELAY
+	.DW	MSG_SWITCH_TSM, MSG_SWITCH_SAA
+	.DW	0
+
+; SCAN_CMDLINE_SWITCHES table: token ptr, target var ptr, value.
+SCAN_SW_TABLE:
+	.DW	MSG_SWITCH_LIST, RUN_MODE
+	.DB	RUNMODE_LIST
+	.DW	MSG_SWITCH_HELP, RUN_MODE
+	.DB	RUNMODE_HELP
+	.DW	MSG_SWITCH_CREDITS, RUN_MODE
+	.DB	RUNMODE_CREDITS
+	.DW	MSG_SWITCH_LOOP, LOOP_REQ
+	.DB	1			; applied once run mode is known
+	.DW	MSG_SWITCH_MSX, HW_DETECT_MODE
+	.DB	HW_MODE_MSX
+	.DW	MSG_SWITCH_RC, HW_DETECT_MODE
+	.DB	HW_MODE_RC
+	.DW	MSG_SWITCH_COLECO, HW_DETECT_MODE
+	.DB	HW_MODE_COLECO
+	.DW	MSG_SWITCH_EB, HW_DETECT_MODE
+	.DB	HW_MODE_EB
+	.DW	MSG_SWITCH_DELAY, DELAYMD
+	.DB	1
+	.DW	MSG_SWITCH_TSM, TS_TOPOLOGY
+	.DB	TS_TOPO_MODULE
+	.DW	MSG_SWITCH_SAA, SAAMD
+	.DB	1			; SAA1099 direct I/O backend
+	.DW	0
 MSG_SWITCH_LIST:
 	.DB	"-list", 0
 MSG_SWITCH_MSX:
@@ -5016,19 +4992,23 @@ MSG_SWITCH_LOOP:
 MSG_ERR_PFX:
 	.DB	"Error: ", 0
 MSG_ERR_TOO_MANY:
-	.DB	"multiple arguments are not supported.", 0
+	.DB	"too many arguments.", 0
 MSG_ERR_UNSUPPORTED:
-	.DB	"unsupported extension (supported: .pt2, .pt3, .mym).", 0
+	.DB	"unsupported extension (want .pt2/.pt3"
+#IFDEF MYM
+	.DB	"/.mym"
+#ENDIF
+	.DB	").", 0
 MSG_ERR_INVALID_FILENAME:
-	.DB	"invalid CP/M filename (use 8.3 format).", 0
+	.DB	"invalid filename (want 8.3).", 0
 MSG_ERR_FILE_NOT_FOUND:
 	.DB	"file not found.", 0
 MSG_ERR_FILE_READ:
 	.DB	"unable to read input file.", 0
 MSG_ERR_INVALID_DATA:
-	.DB	"invalid tune structure for selected format.", 0
+	.DB	"invalid tune structure.", 0
 MSG_ERR_ENGINE_INIT:
-	.DB	"engine initialization failed.", 0
+	.DB	"engine init failed.", 0
 MSG_ERR_UNKNOWN_SWITCH_PFX:
 	.DB	"Error: unknown switch [", 0
 MSG_ERR_UNKNOWN_SWITCH_SFX:
@@ -5036,7 +5016,7 @@ MSG_ERR_UNKNOWN_SWITCH_SFX:
 MSG_EXITING:
 	.DB	"Done...", 0
 HW_DESC_UNKNOWN:
-	.DB	"Unknown (using default)", 0
+	.DB	"Unknown (default)", 0
 HW_DESC_HBIOS:
 	.DB	"HBIOS-reported AY ports", 0
 HW_DESC_MSX:
@@ -5197,7 +5177,7 @@ TS_PORT2_RDAT:
 TS_DESC1:
 	.DW	HW_DESC_MSX
 TS_DESC2:
-	.DW	TSSTR_COLECO
+	.DW	HW_DESC_COLECO
 CTX_VPTR:
 	.DW	0
 CTX_PPTR:
