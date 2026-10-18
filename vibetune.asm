@@ -2762,6 +2762,8 @@ MAIN_POLL_BDOS:
 	AND	$7F
 	OR	A
 	JP	Z, MAIN_LOOP_NOKEY
+	CP	'l'			; preserve case for the l/L loop toggle
+	JR	Z, MAIN_KEY_GOT
 	CALL	TO_UPPER
 MAIN_KEY_GOT:
 
