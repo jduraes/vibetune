@@ -13,8 +13,9 @@
 ;   byte 4: cols (0 -> default 80)
 ;   byte 5: TS topology (0=auto, 1=dual-card, 2=single-card dual-AVR module)
 ;   byte 6: primary AY card (0=auto, 1=MSX, 2=RC, 3=EB, 4=Coleco, 5=SAA1099)
-;   byte 7: second card for dual-card (0=none, 1..4 as above, 5=SAA1099 as
-;           O-toggle alternate only — never a TurboSound second AY)
+;   byte 7: second card (dual-card topology) or O-toggle alternate (other
+;           topologies): 0=none, 1..4 = TS second AY card (dual only),
+;           5=SAA1099 = O-toggle alternate only — never a TurboSound second AY
 ;
 ; vtune.com: CFG is the default; CLI (-msx/-rc/-eb/-coleco/-tsm) overrides.
 ;
@@ -214,6 +215,7 @@ START_INT_STATUS:
 	LD	A, (CFG_TSTOPO)
 	CP	TS_TOPO_DUALCARD
 	CALL	Z, TCFG_ASK_CARD2
+	CALL	NZ, TCFG_ASK_OUTALT
 	CALL	TCFG_ASK_TERM
 	CALL	TCFG_ASK_ANSI
 
@@ -458,10 +460,19 @@ TCFG_PRINT_SUMMARY:
 	CALL	CRLF
 	LD	A, (CFG_TSTOPO)
 	CP	TS_TOPO_DUALCARD
-	JR	NZ, TCFG_SUMMARY_TERM
+	JR	NZ, TCFG_SUMMARY_OUTALT
 	LD	DE, MSG_CFGCARD2
 	CALL	PRTSTR
 	LD	A, (CFG_CARD2)
+	CALL	PRINT_CARD_NAME
+	CALL	CRLF
+	JR	TCFG_SUMMARY_TERM
+TCFG_SUMMARY_OUTALT:
+	LD	A, (CFG_CARD2)
+	CP	AY_CARD_SAA
+	JR	NZ, TCFG_SUMMARY_TERM
+	LD	DE, MSG_CFGOUTALT
+	CALL	PRTSTR
 	CALL	PRINT_CARD_NAME
 	CALL	CRLF
 TCFG_SUMMARY_TERM:
@@ -740,6 +751,63 @@ TCFG_ASK_C2_STORE:
 	LD	(CFG_CARD2), A
 	RET
 
+;-------------------------------------------------------------------------------
+; O-key alternate output (non-dual-card topologies only). SAA1099 or none;
+; orthogonal to TurboSound topology — never forces a dual-card second AY.
+;-------------------------------------------------------------------------------
+TCFG_ASK_OUTALT:
+	LD	A, (CFG_CARD2)
+	OR	A
+	JR	Z, TCFG_ASK_OUTALT0
+	CP	AY_CARD_SAA
+	JR	Z, TCFG_ASK_OUTALT0
+	XOR	A
+	LD	(CFG_CARD2), A		; stale non-SAA value (was dual-card 2nd AY)
+TCFG_ASK_OUTALT0:
+	CALL	TCFG_COL_PRM
+	LD	DE, MSG_OUTALTMENU
+	CALL	PRTSTR
+	CALL	CRLF
+	LD	DE, MSG_CARDPROMPT
+	CALL	PRTSTR
+	LD	A, (CFG_CARD2)
+	CP	AY_CARD_SAA
+	JR	Z, TCFG_ASK_OUTALT_SAA
+	LD	DE, MSG_CARD_NONE
+	CALL	PRTSTR
+	JR	TCFG_ASK_OUTALT_PR
+TCFG_ASK_OUTALT_SAA:
+	LD	DE, MSG_CARD_SAA
+	CALL	PRTSTR
+TCFG_ASK_OUTALT_PR:
+	LD	DE, MSG_PROMPTEND
+	CALL	PRTSTR
+	CALL	TCFG_COL_RST
+	CALL	TCFG_GETCH
+	CP	13
+	JR	Z, TCFG_ASK_OUTALT_KEEP
+	PUSH	AF
+	CALL	PRTCHR
+	CALL	CRLF
+	POP	AF
+	CALL	TO_UPPER
+	CP	'S'
+	JR	Z, TCFG_ASK_OUTALT_SET
+	CP	'N'
+	JR	Z, TCFG_ASK_OUTALT_NONE
+	JR	TCFG_ASK_OUTALT0
+TCFG_ASK_OUTALT_KEEP:
+	CALL	CRLF
+	RET
+TCFG_ASK_OUTALT_SET:
+	LD	A, AY_CARD_SAA
+	LD	(CFG_CARD2), A
+	RET
+TCFG_ASK_OUTALT_NONE:
+	XOR	A
+	LD	(CFG_CARD2), A
+	RET
+
 PRINT_CARD_NAME:
 	CP	AY_CARD_MSX
 	JR	Z, PRINT_CARD_MSX
@@ -806,8 +874,6 @@ TCFG_ASK_TS_KEEP:
 TCFG_ASK_TS_AUTO:
 	XOR	A
 	LD	(CFG_TSTOPO), A
-	XOR	A
-	LD	(CFG_CARD2), A
 	RET
 TCFG_ASK_TS_DUAL:
 	LD	A, TS_TOPO_DUALCARD
@@ -816,8 +882,6 @@ TCFG_ASK_TS_DUAL:
 TCFG_ASK_TS_MOD:
 	LD	A, TS_TOPO_MODULE
 	LD	(CFG_TSTOPO), A
-	XOR	A
-	LD	(CFG_CARD2), A
 	RET
 
 PRINT_TS_NAME:
@@ -1933,6 +1997,10 @@ MSG_CFGCARD1:
 	.DB	"  Primary AY: ", 0
 MSG_CFGCARD2:
 	.DB	"  Second AY:  ", 0
+MSG_CFGOUTALT:
+	.DB	"  O alternate:", 0
+MSG_OUTALTMENU:
+	.DB	"O-key alternate output (O toggles to it mid-song)? S=SAA1099 ($75/$74), N=none", 0
 MSG_CFGTS:
 	.DB	"  TurboSound: ", 0
 MSG_CARD1MENU:

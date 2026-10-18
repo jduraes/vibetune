@@ -8,7 +8,7 @@ UI and TurboSound (two cards, a dual-AVR module, or one SAA1099). Default
 builds omit MYM; `Build.cmd MYM` adds it. `vtunecfg.com` writes `VTUNE.CFG`
 (display, sound card, TurboSound topology).
 
-Current release: **v0.1.35** (branch `saa1099`).
+Current release: **v0.1.36** (branch `saa1099`).
 
 ## Features
 
@@ -91,9 +91,11 @@ each AY register frame onto the 6-channel SAA:
   changes nothing: the AY side needs an AY source found at startup
   (CLI/CFG/HBIOS/probe — not the bare fallback), and the SAA1099, being
   write-only and unprobeable, must be explicitly configured — start with
-  `-saa`, or declare it as primary card (5) or as the second card
-  (`vtunecfg`, dual-card topology, `S` at the second-card prompt; a second
-  SAA is only an `O` alternate, never a TurboSound second chip). A dual-card
+  `-saa`, or declare it as primary card (5) or as the `O` alternate
+  (`vtunecfg`: with auto/AVR-module TS topology answer the O-alternate
+  prompt with `S`; with dual-card topology pick `S` at the second-card
+  prompt; a second SAA is only an `O` alternate, never a TurboSound
+  second chip, and never changes the TS topology). A dual-chip
   TurboSound song toggles between "dual AY" and "single SAA (3+3)".
 
 ## Usage

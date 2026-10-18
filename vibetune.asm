@@ -2189,8 +2189,18 @@ TS_PORTS_SETUP_AY:
 	CP	TS_TOPO_MODULE
 	JP	Z, TS_PORTS_SETUP_MODULE
 	CP	TS_TOPO_DUALCARD
-	JP	Z, TS_PORTS_CFG_DUAL
+	JR	NZ, TS_PORTS_SETUP_AUTO
 
+	; Dual-card + SAA as second card: v0.1.35 vtunecfg forced dual-card
+	; just to declare the O-toggle alternate. card2=5 can never be a TS
+	; second AY — reinterpret as the AVR-module probe so the user's
+	; module topology is healed without re-running vtunecfg.
+	LD	A, (CFG_AY_CARD2)
+	CP	HW_MODE_SAA
+	JP	Z, TS_PORTS_SETUP_MODULE
+	JP	TS_PORTS_CFG_DUAL
+
+TS_PORTS_SETUP_AUTO:
 	; Auto: try a second real AY (HBIOS). Do NOT promote Hi-Z to
 	; AVR module — write-only AY clones (e.g. KC89C72) and empty
 	; buses look identical to the dual-AVR module. Use CFG/-tsm.
