@@ -15,9 +15,15 @@
 ; Free Software Foundation, either version 3 of the License, or (at your
 ; option) any later version. See the LICENSE file for the full text.
 ;
+#IFDEF VT_IN_ROMWBW
+#include "../../ver.inc"
+#include "../Tune/cpm.inc"
+#include "../../HBIOS/hbios.inc"
+#ELSE
 #include "../RomWBW/Source/ver.inc"
 #include "../RomWBW/Source/Apps/Tune/cpm.inc"
 #include "../RomWBW/Source/HBIOS/hbios.inc"
+#ENDIF
 #include "vtver.inc"
 
 #DEFINE ERR_OK 0

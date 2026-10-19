@@ -1,15 +1,24 @@
 OBJECTS = vtune.com vtunecfg.com
-DEST = ../RomWBW/Binary/Apps
+
+# Dual-context: RomWBW Source/Apps/VibeTune (junction) vs sibling ../VibeTune
+ifeq ($(wildcard ../../../Tools/tasm32),)
 TOOLS = ../RomWBW/Tools
+DEST = ../RomWBW/Binary/Apps
+VTFLAGS =
+else
+TOOLS = ../../../Tools
+DEST = ../../../Binary/Apps
+VTFLAGS = -dVT_IN_ROMWBW
+endif
 
 include $(TOOLS)/Makefile.inc
 
 DEPS := vibetune.asm vtver.inc timing.inc pt3bulba.inc pt3shim.inc ansiui.inc
 
 vtune.com: $(DEPS)
-	$(TASM) -dWBW vibetune.asm vtune.com vtune.lst
+	$(TASM) -dWBW $(VTFLAGS) vibetune.asm vtune.com vtune.lst
 
 CFG_DEPS := vtunecfg.asm vtver.inc
 
 vtunecfg.com: $(CFG_DEPS)
-	$(TASM) -dWBW vtunecfg.asm vtunecfg.com vtunecfg.lst
+	$(TASM) -dWBW $(VTFLAGS) vtunecfg.asm vtunecfg.com vtunecfg.lst

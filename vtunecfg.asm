@@ -25,8 +25,13 @@
 ;        VTUNECFG verify          write+read+compare roundtrip check
 ;===============================================================================
 
+#IFDEF VT_IN_ROMWBW
+#include "../../ver.inc"
+#include "../Tune/cpm.inc"
+#ELSE
 #include "../RomWBW/Source/ver.inc"
 #include "../RomWBW/Source/Apps/Tune/cpm.inc"
+#ENDIF
 #include "vtver.inc"
 
 #DEFINE CFG_MAGIC $A5
